@@ -54,7 +54,6 @@ export async function POST(
                     event_id: eventId,
                     received_at: new Date().toISOString(),
                     webhook_path: resolvedParams.path?.join('/') || 'root',
-                    webhook_source: request.headers.get('x-webhook-source') || 'unknown',
                     body: bodyText,
                     headers: Object.fromEntries(request.headers.entries()),
                     parse_error: parseError.message
@@ -76,7 +75,6 @@ export async function POST(
             event_id: eventId,
             received_at: new Date().toISOString(),
             webhook_path: resolvedParams.path?.join('/') || 'root',
-            webhook_source: request.headers.get('x-webhook-source') || 'unknown',
             content_type: request.headers.get('content-type'),
             user_agent: request.headers.get('user-agent'),
         };
@@ -84,9 +82,18 @@ export async function POST(
         // Try auto-schema insert first
         try {
             console.log(Object.keys(body));
+            
+            // Clean up array fields for BigQuery - convert empty arrays to null
+            const cleanedBody = JSON.parse(JSON.stringify(body, (key, value) => {
+                if (Array.isArray(value) && value.length === 0) {
+                    return null;
+                }
+                return value;
+            }));
+            
             await dataset.table('events_auto').insert([{
                 ...context,
-                ...body
+                ...cleanedBody
             }], {
                 ignoreUnknownValues: true,
                 skipInvalidRows: true
