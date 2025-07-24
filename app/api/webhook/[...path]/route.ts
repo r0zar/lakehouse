@@ -17,10 +17,14 @@ export async function POST(
     const startTime = Date.now();
     const eventId = crypto.randomUUID();
     const resolvedParams = await params;
+    
+    // Read body once and store both parsed and raw versions
+    const bodyText = await request.text();
+    let body: any;
 
     try {
         // Parse body
-        const body = await request.json();
+        body = JSON.parse(bodyText);
 
         // Build context from request
         const context = {
@@ -62,6 +66,31 @@ export async function POST(
             latency_ms: Date.now() - startTime
         });
 
+    } catch (parseError: any) {
+        console.error(`❌ JSON parsing failed for ${eventId}:`, parseError);
+        
+        // Store unparsed body in raw events table
+        try {
+            await dataset.table('events_raw').insert([{
+                event_id: eventId,
+                received_at: new Date().toISOString(),
+                webhook_path: resolvedParams.path?.join('/') || 'root',
+                webhook_source: request.headers.get('x-webhook-source') || 'unknown',
+                body: bodyText,
+                headers: Object.fromEntries(request.headers.entries()),
+                parse_error: parseError.message
+            }]);
+            
+            return NextResponse.json({
+                ok: true,
+                event_id: eventId,
+                note: 'Stored as raw data due to parse error'
+            });
+        } catch (rawInsertError: any) {
+            console.error(`❌ Raw insert failed for ${eventId}:`, rawInsertError);
+        }
+    }
+
     } catch (error: any) {
         console.error(`❌ Webhook ${eventId} failed:`, error);
 
@@ -71,7 +100,7 @@ export async function POST(
                 event_id: eventId,
                 failed_at: new Date().toISOString(),
                 error: error.message,
-                raw_body: await request.text(),
+                raw_body: bodyText,
                 url: request.url
             }]);
         } catch (dlqError) {
