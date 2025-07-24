@@ -38,7 +38,7 @@ export async function POST(
 
     try {
         const bodyText = await request.text();
-        
+
         // Create event record with all data as JSON
         const eventRecord = {
             event_id: eventId,
@@ -47,7 +47,8 @@ export async function POST(
             body_text: bodyText,
             headers: Object.fromEntries(request.headers.entries()),
             url: request.url,
-            method: request.method
+            method: request.method,
+            body_json: null // Will be set after JSON parsing
         };
 
         // Try to parse JSON and add it as structured field, but don't fail if parsing fails
@@ -67,7 +68,7 @@ export async function POST(
 
     } catch (error: any) {
         console.error(`Webhook ${eventId} failed:`, error);
-        
+
         // Always return 200 to prevent webhook retries
         return NextResponse.json({
             ok: false,
