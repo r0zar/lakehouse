@@ -7,12 +7,12 @@ let credentials;
 try {
     if (process.env.GOOGLE_CLOUD_CREDENTIALS) {
         // Try base64 decode first, then regular JSON parse
-        const credString = process.env.GOOGLE_CLOUD_CREDENTIALS.startsWith('{') 
+        const credString = process.env.GOOGLE_CLOUD_CREDENTIALS.startsWith('{')
             ? process.env.GOOGLE_CLOUD_CREDENTIALS
             : Buffer.from(process.env.GOOGLE_CLOUD_CREDENTIALS, 'base64').toString();
-        
+
         credentials = JSON.parse(credString);
-        
+
         // Fix private key formatting
         if (credentials.private_key) {
             credentials.private_key = credentials.private_key.replace(/\\n/g, '\n');
@@ -36,7 +36,7 @@ export async function POST(
     const startTime = Date.now();
     const eventId = crypto.randomUUID();
     const resolvedParams = await params;
-    
+
     try {
         // Read body once and store both parsed and raw versions
         const bodyText = await request.text();
@@ -47,7 +47,7 @@ export async function POST(
             body = JSON.parse(bodyText);
         } catch (parseError: any) {
             console.error(`❌ JSON parsing failed for ${eventId}:`, parseError);
-            
+
             // Store unparsed body in raw events table
             try {
                 await dataset.table('events_raw').insert([{
@@ -59,7 +59,7 @@ export async function POST(
                     headers: Object.fromEntries(request.headers.entries()),
                     parse_error: parseError.message
                 }]);
-                
+
                 return NextResponse.json({
                     ok: true,
                     event_id: eventId,
@@ -83,6 +83,7 @@ export async function POST(
 
         // Try auto-schema insert first
         try {
+            console.log(Object.keys(body));
             await dataset.table('events_auto').insert([{
                 ...context,
                 ...body
