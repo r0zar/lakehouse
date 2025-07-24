@@ -67,7 +67,7 @@ export async function POST(
         });
 
     } catch (error: any) {
-        console.error(`Webhook ${eventId} failed:`, error);
+        console.error(`Webhook ${eventId} failed:`, JSON.stringify(error, null, 2));
 
         // Always return 200 to prevent webhook retries
         return NextResponse.json({
