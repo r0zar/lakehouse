@@ -33,114 +33,46 @@ export async function POST(
     request: NextRequest,
     { params }: { params: Promise<{ path: string[] }> }
 ) {
-    const startTime = Date.now();
     const eventId = crypto.randomUUID();
     const resolvedParams = await params;
 
     try {
-        // Read body once and store both parsed and raw versions
         const bodyText = await request.text();
-        let body: any;
-
-        try {
-            // Parse body
-            body = JSON.parse(bodyText);
-        } catch (parseError: any) {
-            console.error(`❌ JSON parsing failed for ${eventId}:`, parseError);
-
-            // Store unparsed body in raw events table
-            try {
-                await dataset.table('events_raw').insert([{
-                    event_id: eventId,
-                    received_at: new Date().toISOString(),
-                    webhook_path: resolvedParams.path?.join('/') || 'root',
-                    body: bodyText,
-                    headers: Object.fromEntries(request.headers.entries()),
-                    parse_error: parseError.message
-                }]);
-
-                return NextResponse.json({
-                    ok: true,
-                    event_id: eventId,
-                    note: 'Stored as raw data due to parse error'
-                });
-            } catch (rawInsertError: any) {
-                console.error(`❌ Raw insert failed for ${eventId}:`, rawInsertError);
-                throw new Error(`Parse error: ${parseError.message}, Raw insert error: ${rawInsertError.message}`);
-            }
-        }
-
-        // Build context from request
-        const context = {
+        
+        // Create event record with all data as JSON
+        const eventRecord = {
             event_id: eventId,
             received_at: new Date().toISOString(),
             webhook_path: resolvedParams.path?.join('/') || 'root',
-            webhook_source: request.headers.get('x-webhook-source') || 'unknown',
-            content_type: request.headers.get('content-type'),
-            user_agent: request.headers.get('user-agent'),
+            body_text: bodyText,
+            headers: Object.fromEntries(request.headers.entries()),
+            url: request.url,
+            method: request.method
         };
 
-        // Try auto-schema insert first
+        // Try to parse JSON and add it as structured field, but don't fail if parsing fails
         try {
-            console.log(Object.keys(body));
-            
-            // Clean up array fields for BigQuery - convert empty arrays to null
-            const cleanedBody = JSON.parse(JSON.stringify(body, (key, value) => {
-                if (Array.isArray(value) && value.length === 0) {
-                    return null;
-                }
-                return value;
-            }));
-            
-            await dataset.table('events_auto').insert([{
-                ...context,
-                ...cleanedBody
-            }], {
-                ignoreUnknownValues: true,
-                skipInvalidRows: true
-            });
-
-            console.log(`✅ Auto-inserted ${eventId} in ${Date.now() - startTime}ms`);
-
-        } catch (schemaError: any) {
-            // Fallback to JSON column
-            console.log(`⚠️ Schema failed for ${eventId}, using JSON fallback:`, JSON.stringify(schemaError, null, 2));
-
-            await dataset.table('events_raw').insert([{
-                ...context,
-                body: body,
-                headers: Object.fromEntries(request.headers.entries()),
-                schema_error: schemaError.message
-            }]);
+            eventRecord.body_json = JSON.parse(bodyText);
+        } catch {
+            // If JSON parsing fails, body_json will be null and we still have body_text
         }
+
+        // Insert into events table - use insertIgnore to handle any BigQuery issues
+        await dataset.table('events').insert([eventRecord]);
 
         return NextResponse.json({
             ok: true,
-            event_id: eventId,
-            latency_ms: Date.now() - startTime
+            event_id: eventId
         });
 
     } catch (error: any) {
-        console.error(`❌ Webhook ${eventId} failed:`, JSON.stringify(error, null, 2));
-
-        // Try dead letter queue
-        try {
-            await dataset.table('events_failed').insert([{
-                event_id: eventId,
-                failed_at: new Date().toISOString(),
-                error: error.message,
-                raw_body: 'Body already consumed',
-                url: request.url
-            }]);
-        } catch (dlqError) {
-            console.error('Dead letter queue failed:', dlqError);
-        }
-
-        // Return 200 to prevent retries
+        console.error(`Webhook ${eventId} failed:`, error);
+        
+        // Always return 200 to prevent webhook retries
         return NextResponse.json({
             ok: false,
             event_id: eventId,
-            error: 'Stored in dead letter queue'
+            error: 'Processing failed'
         }, { status: 200 });
     }
 }
