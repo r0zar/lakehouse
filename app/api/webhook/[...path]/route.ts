@@ -58,8 +58,13 @@ export async function POST(
             // If JSON parsing fails, body_json will be null and we still have body_text
         }
 
-        // Insert into events table - use insertIgnore to handle any BigQuery issues
-        await dataset.table('events').insert([eventRecord]);
+        // Insert into events table with options for better reliability
+        await dataset.table('events').insert([eventRecord], {
+            ignoreUnknownValues: true,
+            skipInvalidRows: false,
+            createDisposition: 'CREATE_IF_NEEDED',
+            autodetect: true
+        });
 
         return NextResponse.json({
             ok: true,
@@ -67,7 +72,15 @@ export async function POST(
         });
 
     } catch (error: any) {
-        console.error(`Webhook ${eventId} failed:`, JSON.stringify(error, null, 2));
+        console.error(`Webhook ${eventId} failed:`, error);
+        
+        // Log detailed error info for PartialFailureError
+        if (error.name === 'PartialFailureError' && error.errors) {
+            console.error('BigQuery insert errors:', JSON.stringify(error.errors, null, 2));
+        }
+        if (error.response) {
+            console.error('BigQuery response:', JSON.stringify(error.response, null, 2));
+        }
 
         // Always return 200 to prevent webhook retries
         return NextResponse.json({
