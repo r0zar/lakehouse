@@ -1,0 +1,95 @@
+// app/api/webhook/[...path]/route.ts
+import { BigQuery } from '@google-cloud/bigquery';
+import { NextRequest, NextResponse } from 'next/server';
+
+// Initialize BigQuery
+const bigquery = new BigQuery({
+    projectId: process.env.GOOGLE_CLOUD_PROJECT,
+    credentials: JSON.parse(process.env.GOOGLE_CLOUD_CREDENTIALS!)
+});
+
+const dataset = bigquery.dataset('crypto_data');
+
+export async function POST(
+    request: NextRequest,
+    { params }: { params: { path: string[] } }
+) {
+    const startTime = Date.now();
+    const eventId = crypto.randomUUID();
+
+    try {
+        // Parse body
+        const body = await request.json();
+
+        // Build context from request
+        const context = {
+            event_id: eventId,
+            received_at: new Date().toISOString(),
+            webhook_path: params.path?.join('/') || 'root',
+            webhook_source: request.headers.get('x-webhook-source') || 'unknown',
+            content_type: request.headers.get('content-type'),
+            user_agent: request.headers.get('user-agent'),
+        };
+
+        // Try auto-schema insert first
+        try {
+            await dataset.table('events_auto').insert([{
+                ...context,
+                ...body
+            }], {
+                autodetect: true,
+                ignoreUnknownValues: true
+            });
+
+            console.log(`✅ Auto-inserted ${eventId} in ${Date.now() - startTime}ms`);
+
+        } catch (schemaError: any) {
+            // Fallback to JSON column
+            console.log(`⚠️ Schema failed for ${eventId}, using JSON fallback`);
+
+            await dataset.table('events_raw').insert([{
+                ...context,
+                body: body,
+                headers: Object.fromEntries(request.headers.entries()),
+                schema_error: schemaError.message
+            }]);
+        }
+
+        return NextResponse.json({
+            ok: true,
+            event_id: eventId,
+            latency_ms: Date.now() - startTime
+        });
+
+    } catch (error: any) {
+        console.error(`❌ Webhook ${eventId} failed:`, error);
+
+        // Try dead letter queue
+        try {
+            await dataset.table('events_failed').insert([{
+                event_id: eventId,
+                failed_at: new Date().toISOString(),
+                error: error.message,
+                raw_body: await request.text(),
+                url: request.url
+            }]);
+        } catch (dlqError) {
+            console.error('Dead letter queue failed:', dlqError);
+        }
+
+        // Return 200 to prevent retries
+        return NextResponse.json({
+            ok: false,
+            event_id: eventId,
+            error: 'Stored in dead letter queue'
+        }, { status: 200 });
+    }
+}
+
+// Handle other methods
+export async function GET() {
+    return NextResponse.json({
+        status: 'Webhook endpoint active',
+        accepts: 'POST requests only'
+    });
+}
