@@ -39,13 +39,22 @@ export async function POST(
     try {
         const bodyText = await request.text();
 
-        // Create event record - store everything as strings for true schemaless approach
+        // Parse JSON body for proper JSON column storage
+        let bodyJson = null;
+        try {
+            bodyJson = JSON.parse(bodyText);
+        } catch {
+            // If parsing fails, store the raw text as a JSON string
+            bodyJson = bodyText;
+        }
+
+        // Create event record with JSON types
         const eventRecord = {
             event_id: eventId,
             received_at: new Date().toISOString(),
             webhook_path: resolvedParams.path?.join('/') || 'root',
-            body_text: bodyText,
-            headers: JSON.stringify(Object.fromEntries(request.headers.entries())),
+            body_json: bodyJson,
+            headers: Object.fromEntries(request.headers.entries()),
             url: request.url,
             method: request.method
         };
