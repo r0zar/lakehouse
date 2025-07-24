@@ -61,9 +61,7 @@ export async function POST(
         // Insert into events table with options for better reliability
         await dataset.table('events').insert([eventRecord], {
             ignoreUnknownValues: true,
-            skipInvalidRows: false,
-            createDisposition: 'CREATE_IF_NEEDED',
-            autodetect: true
+            skipInvalidRows: false
         });
 
         return NextResponse.json({
