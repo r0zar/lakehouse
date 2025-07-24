@@ -12,10 +12,11 @@ const dataset = bigquery.dataset('crypto_data');
 
 export async function POST(
     request: NextRequest,
-    { params }: { params: { path: string[] } }
+    { params }: { params: Promise<{ path: string[] }> }
 ) {
     const startTime = Date.now();
     const eventId = crypto.randomUUID();
+    const resolvedParams = await params;
 
     try {
         // Parse body
@@ -25,7 +26,7 @@ export async function POST(
         const context = {
             event_id: eventId,
             received_at: new Date().toISOString(),
-            webhook_path: params.path?.join('/') || 'root',
+            webhook_path: resolvedParams.path?.join('/') || 'root',
             webhook_source: request.headers.get('x-webhook-source') || 'unknown',
             content_type: request.headers.get('content-type'),
             user_agent: request.headers.get('user-agent'),
@@ -37,8 +38,8 @@ export async function POST(
                 ...context,
                 ...body
             }], {
-                autodetect: true,
-                ignoreUnknownValues: true
+                ignoreUnknownValues: true,
+                skipInvalidRows: true
             });
 
             console.log(`✅ Auto-inserted ${eventId} in ${Date.now() - startTime}ms`);
