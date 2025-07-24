@@ -96,7 +96,7 @@ export async function POST(
 
         } catch (schemaError: any) {
             // Fallback to JSON column
-            console.log(`⚠️ Schema failed for ${eventId}, using JSON fallback`);
+            console.log(`⚠️ Schema failed for ${eventId}, using JSON fallback:`, JSON.stringify(schemaError, null, 2));
 
             await dataset.table('events_raw').insert([{
                 ...context,
