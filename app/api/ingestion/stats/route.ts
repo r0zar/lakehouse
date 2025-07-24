@@ -3,9 +3,11 @@ import { bigquery } from '@/lib/bigquery'
 
 export async function GET() {
   try {
+    const dataset = process.env.BIGQUERY_DATASET || 'crypto_data_test';
+    
     // Get total events count
     const [totalEventsRows] = await bigquery.query({
-      query: 'SELECT COUNT(*) as total FROM crypto_data_test.events',
+      query: `SELECT COUNT(*) as total FROM ${dataset}.events`,
       location: 'US'
     })
     const totalEvents = totalEventsRows[0]?.total || 0
@@ -14,7 +16,7 @@ export async function GET() {
     const [recentEventsRows] = await bigquery.query({
       query: `
         SELECT COUNT(*) as recent 
-        FROM crypto_data_test.events 
+        FROM ${dataset}.events 
         WHERE received_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR)
       `,
       location: 'US'
@@ -25,7 +27,7 @@ export async function GET() {
     const [lastEventRows] = await bigquery.query({
       query: `
         SELECT MAX(received_at) as last_event 
-        FROM crypto_data_test.events
+        FROM ${dataset}.events
       `,
       location: 'US'
     })
@@ -38,7 +40,7 @@ export async function GET() {
     for (const tableName of stagingTableNames) {
       try {
         const [rows] = await bigquery.query({
-          query: `SELECT COUNT(*) as count FROM crypto_data_test.${tableName}`,
+          query: `SELECT COUNT(*) as count FROM ${dataset}.${tableName}`,
           location: 'US'
         })
         stagingTables[tableName] = rows[0]?.count || 0

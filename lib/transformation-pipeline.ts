@@ -50,7 +50,8 @@ export async function runFullPipeline(): Promise<void> {
   
   try {
     // Use production dataset (crypto_data) unless test mode is enabled
-    const datasetName = process.env.NODE_ENV === 'test' ? 'crypto_data_test' : dataset.id;
+    const datasetName = process.env.NODE_ENV === 'test' ? 'crypto_data_test' : (process.env.BIGQUERY_DATASET || 'crypto_data');
+    console.log(`🔍 Using dataset for full pipeline: ${datasetName} (NODE_ENV: ${process.env.NODE_ENV})`);
     await runTransformationPipeline(TRANSFORMATION_PIPELINE, datasetName);
     console.log('✅ Transformation pipeline completed successfully');
   } catch (error) {
@@ -71,7 +72,8 @@ export async function runStagingPipeline(): Promise<void> {
   
   try {
     // Use production dataset (crypto_data) unless test mode is enabled
-    const datasetName = process.env.NODE_ENV === 'test' ? 'crypto_data_test' : dataset.id;
+    const datasetName = process.env.NODE_ENV === 'test' ? 'crypto_data_test' : (process.env.BIGQUERY_DATASET || 'crypto_data');
+    console.log(`🔍 Using dataset: ${datasetName} (NODE_ENV: ${process.env.NODE_ENV})`);
     await runTransformationPipeline(stagingTransformations, datasetName);
     console.log('✅ Real-time staging pipeline completed successfully');
   } catch (error) {
@@ -92,7 +94,8 @@ export async function runMartsPipeline(): Promise<void> {
   
   try {
     // Use production dataset (crypto_data) unless test mode is enabled
-    const datasetName = process.env.NODE_ENV === 'test' ? 'crypto_data_test' : dataset.id;
+    const datasetName = process.env.NODE_ENV === 'test' ? 'crypto_data_test' : (process.env.BIGQUERY_DATASET || 'crypto_data');
+    console.log(`🔍 Using dataset: ${datasetName} (NODE_ENV: ${process.env.NODE_ENV})`);
     await runTransformationPipeline(martTransformations, datasetName);
     console.log('✅ On-demand marts pipeline completed successfully');
   } catch (error) {
@@ -119,7 +122,8 @@ export async function runSpecificMarts(martNames: string[]): Promise<void> {
   
   try {
     // Use production dataset (crypto_data) unless test mode is enabled
-    const datasetName = process.env.NODE_ENV === 'test' ? 'crypto_data_test' : dataset.id;
+    const datasetName = process.env.NODE_ENV === 'test' ? 'crypto_data_test' : (process.env.BIGQUERY_DATASET || 'crypto_data');
+    console.log(`🔍 Using dataset for specific marts: ${datasetName} (NODE_ENV: ${process.env.NODE_ENV})`);
     await runTransformationPipeline(specificTransformations, datasetName);
     console.log(`✅ Specific marts completed: ${martNames.join(', ')}`);
   } catch (error) {
