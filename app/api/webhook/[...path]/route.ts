@@ -75,6 +75,7 @@ export async function POST(
             event_id: eventId,
             received_at: new Date().toISOString(),
             webhook_path: resolvedParams.path?.join('/') || 'root',
+            webhook_source: request.headers.get('x-webhook-source') || 'unknown',
             content_type: request.headers.get('content-type'),
             user_agent: request.headers.get('user-agent'),
         };
