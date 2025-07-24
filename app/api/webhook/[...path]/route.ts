@@ -39,24 +39,16 @@ export async function POST(
     try {
         const bodyText = await request.text();
 
-        // Create event record with all data as JSON
+        // Create event record - store everything as strings for true schemaless approach
         const eventRecord = {
             event_id: eventId,
             received_at: new Date().toISOString(),
             webhook_path: resolvedParams.path?.join('/') || 'root',
             body_text: bodyText,
-            headers: Object.fromEntries(request.headers.entries()),
+            headers: JSON.stringify(Object.fromEntries(request.headers.entries())),
             url: request.url,
-            method: request.method,
-            body_json: null // Will be set after JSON parsing
+            method: request.method
         };
-
-        // Try to parse JSON and add it as structured field, but don't fail if parsing fails
-        try {
-            eventRecord.body_json = JSON.parse(bodyText);
-        } catch {
-            // If JSON parsing fails, body_json will be null and we still have body_text
-        }
 
         // Insert into events table with options for better reliability
         await dataset.table('events').insert([eventRecord], {
