@@ -10,10 +10,7 @@ const bigquery = new BigQuery({
 
 const dataset = bigquery.dataset('crypto_data');
 
-export async function POST(
-    request: NextRequest,
-    { params }: { params: { path: string[] } }
-) {
+export async function POST(request: NextRequest, { params }: { params: { path?: string[] } }) {
     const startTime = Date.now();
     const eventId = crypto.randomUUID();
 
