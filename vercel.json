@@ -2,67 +2,67 @@
   "crons": [
     {
       "path": "/api/cron/refresh-addresses",
-      "schedule": "* * * * *"
+      "schedule": "*/2 * * * *"
     },
     {
       "path": "/api/cron/refresh-events",
-      "schedule": "* * * * *"
+      "schedule": "*/2 * * * *"
     },
     {
       "path": "/api/cron/refresh-blocks",
-      "schedule": "* * * * *"
+      "schedule": "*/2 * * * *"
     },
     {
       "path": "/api/cron/refresh-transactions",
-      "schedule": "* * * * *"
+      "schedule": "*/2 * * * *"
     },
     {
       "path": "/api/cron/refresh-daily-activity",
-      "schedule": "*/5 * * * *"
-    },
-    {
-      "path": "/api/cron/refresh-contract-activity",
-      "schedule": "*/5 * * * *"
-    },
-    {
-      "path": "/api/cron/refresh-dim-blocks",
-      "schedule": "*/15 * * * *"
-    },
-    {
-      "path": "/api/cron/refresh-dim-transactions",
-      "schedule": "*/15 * * * *"
-    },
-    {
-      "path": "/api/cron/refresh-dim-smart-contract-activity",
-      "schedule": "*/15 * * * *"
-    },
-    {
-      "path": "/api/cron/discover-contracts",
-      "schedule": "* * * * *"
-    },
-    {
-      "path": "/api/cron/analyze-contracts",
       "schedule": "*/10 * * * *"
     },
     {
+      "path": "/api/cron/refresh-contract-activity",
+      "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron/refresh-dim-blocks",
+      "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/cron/refresh-dim-transactions",
+      "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/cron/refresh-dim-smart-contract-activity",
+      "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/cron/discover-contracts",
+      "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/cron/analyze-contracts",
+      "schedule": "*/20 * * * *"
+    },
+    {
       "path": "/api/cron/discover-tokens",
-      "schedule": "30 * * * *"
+      "schedule": "0 */2 * * *"
     },
     {
       "path": "/api/cron/analyze-tokens",
-      "schedule": "*/15 * * * *"
+      "schedule": "*/30 * * * *"
     },
     {
       "path": "/api/cron/refresh-fact-defi-metrics",
-      "schedule": "0 */4 * * *"
+      "schedule": "0 */8 * * *"
     },
     {
       "path": "/api/cron/refresh-token-metadata",
-      "schedule": "0 * * * *"
+      "schedule": "0 */2 * * *"
     },
     {
       "path": "/api/cron/refresh-popular-tokens",
-      "schedule": "0 6 * * *"
+      "schedule": "0 12 * * *"
     }
   ]
 }

@@ -517,8 +517,8 @@ export default function TokenBuyersAndSellersPage() {
 
         // Populate available tokens for search (sorted by activity)
         const tokensWithActivity = result.token_metadata
-          .filter(token => token.token_symbol || token.token_name)
-          .map(token => ({
+          .filter((token: any) => token.token_symbol || token.token_name)
+          .map((token: any) => ({
             contract_address: token.contract_address,
             symbol: token.token_symbol || token.contract_address.split('.').pop(),
             name: token.token_name || token.token_symbol || token.contract_address,
@@ -526,7 +526,7 @@ export default function TokenBuyersAndSellersPage() {
             decimals: token.decimals,
             metadata: token
           }))
-          .sort((a, b) => (b.metadata.transaction_count || 0) - (a.metadata.transaction_count || 0));
+          .sort((a: any, b: any) => (b.metadata.transaction_count || 0) - (a.metadata.transaction_count || 0));
         
         // Add STX to the top
         const allTokens = [
