@@ -1,4 +1,7 @@
 -- Dimensional transactions table with business logic and derived metrics
+-- Provides enriched transaction data with categorization and calculated metrics
+
+CREATE OR REPLACE TABLE crypto_data.dim_transactions AS
 SELECT 
   -- Primary identifiers
   tx.tx_hash,
@@ -11,13 +14,11 @@ SELECT
   tx.success,
   tx.operation_count,
   
-  -- Derived business logic
+  -- Extract transaction type by splitting on colon for invoked and deployed calls
   CASE 
-    WHEN LOWER(tx.description) LIKE '%transfer%' THEN 'transfer'
-    WHEN LOWER(tx.description) LIKE '%contract%' THEN 'contract_call'
-    WHEN LOWER(tx.description) LIKE '%deploy%' THEN 'contract_deploy'
-    WHEN LOWER(tx.description) LIKE '%mint%' THEN 'token_mint'
-    ELSE 'other'
+    WHEN tx.description LIKE 'invoked:%' THEN SPLIT(tx.description, ':')[OFFSET(0)]
+    WHEN tx.description LIKE 'deployed:%' THEN SPLIT(tx.description, ':')[OFFSET(0)]
+    ELSE tx.description
   END as transaction_type,
   
   -- Calculated metrics
@@ -49,4 +50,4 @@ SELECT
   tx.received_at as created_at,
   CURRENT_TIMESTAMP() as updated_at
 
-FROM crypto_data_test.stg_transactions tx
+FROM crypto_data.stg_transactions tx

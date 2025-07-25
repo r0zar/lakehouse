@@ -1,125 +1,75 @@
--- DeFi Protocol Metrics - Daily aggregated insights across all DeFi activity
--- This fact table provides KPIs for DeFi ecosystem monitoring and analytics
-
+-- DeFi Metrics Fact Table - Aggregated DeFi ecosystem metrics by time period
+CREATE OR REPLACE TABLE crypto_data.fact_defi_metrics AS
 SELECT 
   -- Time dimensions
-  DATE(base_events.block_time) as metrics_date,
+  DATE(block_time) as metric_date,
+  EXTRACT(HOUR FROM block_time) as metric_hour,
+  FORMAT_DATE('%Y-%m', DATE(block_time)) as metric_month,
+  EXTRACT(DAYOFWEEK FROM DATE(block_time)) as day_of_week,
   
-  -- Protocol aggregations
-  COUNT(DISTINCT swap_events.contract_identifier) as active_dex_contracts,
-  COUNT(DISTINCT lending_events.contract_identifier) as active_lending_contracts,
-  COUNT(DISTINCT stacking_events.contract_identifier) as active_stacking_contracts,
+  -- Protocol metrics
+  dex_protocol,
   
-  -- Swap metrics
-  COUNT(swap_events.tx_hash) as total_swaps,
-  COUNT(DISTINCT swap_events.tx_hash) as unique_swap_transactions,
-  SUM(SAFE_CAST(JSON_EXTRACT_SCALAR(swap_events.raw_event_data, '$.data.value.data.x-amount') AS INT64)) as total_swap_volume_input,
-  AVG(SAFE_CAST(JSON_EXTRACT_SCALAR(swap_events.raw_event_data, '$.data.value.data.x-amount') AS INT64)) as avg_swap_size,
+  -- Volume and activity metrics (counts only to avoid overflow)
+  COUNT(*) as total_swaps,
+  COUNT(CASE WHEN success = true THEN 1 END) as successful_swaps,
+  COUNT(CASE WHEN success = false THEN 1 END) as failed_swaps,
   
-  -- Fee analysis
-  SUM(SAFE_CAST(JSON_EXTRACT_SCALAR(swap_events.raw_event_data, '$.data.value.data.x-amount-fees-protocol') AS INT64)) as total_protocol_fees,
-  SUM(SAFE_CAST(JSON_EXTRACT_SCALAR(swap_events.raw_event_data, '$.data.value.data.x-amount-fees-provider') AS INT64)) as total_provider_fees,
-  SUM(SAFE_CAST(JSON_EXTRACT_SCALAR(agg_fee_events.raw_event_data, '$.data.value.data.amount-fees-total') AS INT64)) as total_aggregator_fees,
+  -- Success rate
+  SAFE_DIVIDE(
+    COUNT(CASE WHEN success = true THEN 1 END),
+    COUNT(*)
+  ) * 100 as success_rate_percent,
   
-  -- User activity
-  COUNT(DISTINCT ft_events.ft_sender) as unique_traders,
-  COUNT(DISTINCT ft_events.ft_recipient) as unique_recipients,
+  -- Transaction fee metrics (using SAFE_CAST to prevent overflow)
+  SAFE_CAST(AVG(transaction_fee) AS INT64) as avg_transaction_fee,
+  SAFE_CAST(MIN(transaction_fee) AS INT64) as min_transaction_fee,
+  SAFE_CAST(MAX(transaction_fee) AS INT64) as max_transaction_fee,
   
-  -- Token diversity
-  COUNT(DISTINCT JSON_EXTRACT_SCALAR(swap_events.raw_event_data, '$.data.value.data.x-token')) as unique_input_tokens,
-  COUNT(DISTINCT JSON_EXTRACT_SCALAR(swap_events.raw_event_data, '$.data.value.data.y-token')) as unique_output_tokens,
+  -- Swap category distribution
+  COUNT(CASE WHEN swap_category = 'stableswap' THEN 1 END) as stableswap_count,
+  COUNT(CASE WHEN swap_category = 'amm' THEN 1 END) as amm_count,
+  COUNT(CASE WHEN swap_category = 'aggregated' THEN 1 END) as aggregated_count,
+  COUNT(CASE WHEN swap_category = 'swap' THEN 1 END) as swap_count,
+  COUNT(CASE WHEN swap_category = 'other' THEN 1 END) as other_count,
   
-  -- Pool activity
-  COUNT(DISTINCT JSON_EXTRACT_SCALAR(swap_events.raw_event_data, '$.data.value.data.pool-contract')) as active_pools,
-  COUNT(pool_update_events.tx_hash) as pool_updates,
+  -- Swap size distribution
+  COUNT(CASE WHEN swap_size_category = 'small' THEN 1 END) as small_swaps,
+  COUNT(CASE WHEN swap_size_category = 'medium' THEN 1 END) as medium_swaps,
+  COUNT(CASE WHEN swap_size_category = 'large' THEN 1 END) as large_swaps,
+  COUNT(CASE WHEN swap_size_category = 'whale' THEN 1 END) as whale_swaps,
   
-  -- Transaction success metrics
-  COUNT(CASE WHEN t.success = true THEN 1 END) as successful_defi_transactions,
-  COUNT(CASE WHEN t.success = false THEN 1 END) as failed_defi_transactions,
-  AVG(CASE WHEN t.success = true THEN 1.0 ELSE 0.0 END) as defi_success_rate,
+  -- Unique metrics
+  COUNT(DISTINCT dex_contract) as unique_contracts,
+  COUNT(DISTINCT tx_hash) as unique_transactions,
   
-  -- Financial flow (from operations)
-  SUM(ops.total_debits) as total_value_debited,
-  SUM(ops.total_credits) as total_value_credited,
-  AVG(ops.operation_count) as avg_operations_per_defi_tx,
+  -- Operation metrics
+  SAFE_CAST(AVG(unique_addresses) AS INT64) as avg_unique_addresses_per_swap,
+  SAFE_CAST(AVG(operation_count) AS INT64) as avg_operations_per_swap,
+  SAFE_CAST(SUM(unique_addresses) AS INT64) as total_unique_addresses,
+  SAFE_CAST(SUM(operation_count) AS INT64) as total_operations,
   
-  -- Complexity metrics
-  AVG(ARRAY_LENGTH(SPLIT(JSON_EXTRACT_SCALAR(swap_events.raw_event_data, '$.data.value.caller'), '.'))) as avg_call_depth,
-  COUNT(CASE WHEN agg_fee_events.tx_hash IS NOT NULL THEN 1 END) as aggregated_transactions,
-  COUNT(CASE WHEN agg_fee_events.tx_hash IS NULL THEN 1 END) as direct_transactions,
+  -- Market dominance (percentage of total swaps) - calculated in post-processing
+  0 as daily_market_share_percent,
   
-  -- Market concentration
-  COUNT(CASE WHEN SAFE_CAST(JSON_EXTRACT_SCALAR(swap_events.raw_event_data, '$.data.value.data.x-amount') AS INT64) > 100000000 THEN 1 END) as whale_transactions,
-  COUNT(CASE WHEN SAFE_CAST(JSON_EXTRACT_SCALAR(swap_events.raw_event_data, '$.data.value.data.x-amount') AS INT64) <= 1000000 THEN 1 END) as retail_transactions
+  -- Growth metrics (compared to previous day) - calculated in post-processing  
+  0 as daily_swap_growth,
+  
+  -- Audit fields
+  MIN(created_at) as earliest_swap_time,
+  MAX(created_at) as latest_swap_time,
+  CURRENT_TIMESTAMP() as calculated_at
 
-FROM 
-  `crypto_data_test.stg_events` base_events
-  
-  -- Swap events
-  LEFT JOIN `crypto_data_test.stg_events` swap_events ON (
-    base_events.block_hash = swap_events.block_hash
-    AND swap_events.event_type = 'SmartContractEvent' 
-    AND (swap_events.action LIKE '%swap%' OR swap_events.action LIKE '%helper%')
-  )
-  
-  -- Lending events  
-  LEFT JOIN `crypto_data_test.stg_events` lending_events ON (
-    base_events.block_hash = lending_events.block_hash
-    AND lending_events.event_type = 'SmartContractEvent'
-    AND (lending_events.action LIKE '%lend%' OR lending_events.action LIKE '%borrow%' OR lending_events.action LIKE '%supply%')
-  )
-  
-  -- Stacking events
-  LEFT JOIN `crypto_data_test.stg_events` stacking_events ON (
-    base_events.block_hash = stacking_events.block_hash
-    AND stacking_events.event_type = 'SmartContractEvent'
-    AND (stacking_events.action LIKE '%pox%' OR stacking_events.action LIKE '%delegate%' OR stacking_events.action LIKE '%stack%')
-  )
-  
-  -- Aggregator fee events
-  LEFT JOIN `crypto_data_test.stg_events` agg_fee_events ON (
-    base_events.block_hash = agg_fee_events.block_hash
-    AND agg_fee_events.event_type = 'SmartContractEvent'
-    AND agg_fee_events.action = 'transfer-aggregator-fees'
-  )
-  
-  -- Token transfer events
-  LEFT JOIN `crypto_data_test.stg_events` ft_events ON (
-    base_events.block_hash = ft_events.block_hash
-    AND ft_events.event_type = 'FTTransferEvent'
-  )
-  
-  -- Pool update events
-  LEFT JOIN `crypto_data_test.stg_events` pool_update_events ON (
-    base_events.block_hash = pool_update_events.block_hash
-    AND pool_update_events.event_type = 'SmartContractEvent'
-    AND pool_update_events.action LIKE '%pool%'
-  )
-  
-  -- Transaction success data
-  LEFT JOIN `crypto_data_test.stg_transactions` t ON (base_events.tx_hash = t.tx_hash)
-  
-  -- Operations summary
-  LEFT JOIN (
-    SELECT 
-      tx_hash,
-      SUM(CASE WHEN operation_type = 'DEBIT' THEN SAFE_CAST(amount AS INT64) END) as total_debits,
-      SUM(CASE WHEN operation_type = 'CREDIT' THEN SAFE_CAST(amount AS INT64) END) as total_credits,
-      COUNT(*) as operation_count
-    FROM `crypto_data_test.stg_addresses`
-    WHERE operation_type IN ('DEBIT', 'CREDIT')
-    GROUP BY tx_hash
-  ) ops ON (base_events.tx_hash = ops.tx_hash)
-
-WHERE 
-  -- Focus on DeFi-related activity
-  (swap_events.tx_hash IS NOT NULL 
-   OR lending_events.tx_hash IS NOT NULL 
-   OR stacking_events.tx_hash IS NOT NULL
-   OR agg_fee_events.tx_hash IS NOT NULL)
+FROM crypto_data.dim_defi_swaps
 
 GROUP BY 
-  DATE(base_events.block_time)
+  DATE(block_time),
+  EXTRACT(HOUR FROM block_time),
+  FORMAT_DATE('%Y-%m', DATE(block_time)),
+  EXTRACT(DAYOFWEEK FROM DATE(block_time)),
+  dex_protocol
 
 ORDER BY 
-  metrics_date DESC
+  metric_date DESC,
+  metric_hour DESC,
+  dex_protocol

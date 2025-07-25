@@ -1,0 +1,52 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/refresh-addresses",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/refresh-events",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/refresh-blocks", 
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/refresh-transactions",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/refresh-daily-activity",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/refresh-contract-activity",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/refresh-dim-blocks",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/refresh-dim-transactions",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/refresh-dim-smart-contract-activity",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/refresh-dim-contracts",
+      "schedule": "0 */4 * * *"
+    },
+    {
+      "path": "/api/cron/refresh-dim-tokens",
+      "schedule": "0 */4 * * *"
+    },
+    {
+      "path": "/api/cron/refresh-fact-defi-metrics",
+      "schedule": "0 */4 * * *"
+    }
+  ]
+}

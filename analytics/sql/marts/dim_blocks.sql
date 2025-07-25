@@ -1,4 +1,5 @@
 -- Dimensional blocks table with business logic and derived metrics
+CREATE OR REPLACE TABLE crypto_data.dim_blocks AS
 WITH block_transactions AS (
   SELECT 
     block_hash,
@@ -6,7 +7,7 @@ WITH block_transactions AS (
     SUM(fee) as total_fees,
     COUNT(CASE WHEN success = true THEN 1 END) as successful_transactions,
     COUNT(CASE WHEN success = false THEN 1 END) as failed_transactions
-  FROM crypto_data_test.stg_transactions
+  FROM crypto_data.stg_transactions
   GROUP BY block_hash
 ),
 
@@ -14,7 +15,7 @@ block_addresses AS (
   SELECT 
     block_hash,
     COUNT(DISTINCT address) as unique_addresses
-  FROM crypto_data_test.stg_addresses
+  FROM crypto_data.stg_addresses
   WHERE address IS NOT NULL
   GROUP BY block_hash
 )
@@ -57,6 +58,6 @@ SELECT
   blocks.received_at as created_at,
   CURRENT_TIMESTAMP() as updated_at
 
-FROM crypto_data_test.stg_blocks blocks
+FROM crypto_data.stg_blocks blocks
 LEFT JOIN block_transactions tx ON blocks.block_hash = tx.block_hash
 LEFT JOIN block_addresses addr ON blocks.block_hash = addr.block_hash

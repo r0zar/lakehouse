@@ -36,13 +36,30 @@ export async function runTransformationAsTable(
   // Replace dataset references in SQL content
   sqlContent = sqlContent.replace(/crypto_data_test\./g, `${dataset}.`);
   
-  console.log(`Running transformation: ${sqlFilePath} -> ${dataset}.${destinationTable}`);
+  const startTime = Date.now();
+  console.log(`🚀 [${new Date().toISOString()}] Starting transformation: ${sqlFilePath} -> ${dataset}.${destinationTable}`);
   
-  await bigquery.query({
-    query: sqlContent,
-    destination: bigquery.dataset(dataset).table(destinationTable),
-    writeDisposition,
-  });
+  try {
+    await bigquery.query({
+      query: sqlContent,
+      destination: bigquery.dataset(dataset).table(destinationTable),
+      writeDisposition,
+      jobTimeoutMs: 60000,
+    });
+    
+    const duration = Date.now() - startTime;
+    console.log(`✅ [${new Date().toISOString()}] Transformation completed: ${sqlFilePath} -> ${dataset}.${destinationTable} (${duration}ms)`);
+  } catch (error: any) {
+    console.error(`❌ Transformation failed: ${sqlFilePath} -> ${dataset}.${destinationTable}`);
+    console.error(`❌ Error:`, error.message);
+    
+    // Log detailed error for BigQuery issues
+    if (error.errors && Array.isArray(error.errors)) {
+      console.error(`❌ BigQuery errors:`, JSON.stringify(error.errors, null, 2));
+    }
+    
+    throw error;
+  }
 }
 
 /**
@@ -56,14 +73,34 @@ export async function runTransformationPipeline(
   }>,
   datasetName?: string
 ): Promise<void> {
-  for (const transformation of transformations) {
-    await runTransformationAsTable(
-      transformation.sqlFile,
-      transformation.destinationTable,
-      transformation.writeDisposition,
-      datasetName
-    );
+  const pipelineStartTime = Date.now();
+  const totalSteps = transformations.length;
+  
+  console.log(`🏗️  [${new Date().toISOString()}] Starting pipeline with ${totalSteps} transformations`);
+  
+  for (let i = 0; i < transformations.length; i++) {
+    const transformation = transformations[i];
+    const stepNumber = i + 1;
+    
+    console.log(`📋 [${new Date().toISOString()}] Step ${stepNumber}/${totalSteps}: ${transformation.sqlFile}`);
+    
+    try {
+      await runTransformationAsTable(
+        transformation.sqlFile,
+        transformation.destinationTable,
+        transformation.writeDisposition,
+        datasetName
+      );
+      
+      console.log(`✅ [${new Date().toISOString()}] Step ${stepNumber}/${totalSteps} completed successfully`);
+    } catch (error) {
+      console.error(`❌ [${new Date().toISOString()}] Step ${stepNumber}/${totalSteps} failed: ${transformation.sqlFile}`);
+      throw error; // Re-throw to stop pipeline
+    }
   }
+  
+  const pipelineDuration = Date.now() - pipelineStartTime;
+  console.log(`🎉 [${new Date().toISOString()}] Pipeline completed successfully! Total time: ${pipelineDuration}ms (${(pipelineDuration/1000).toFixed(2)}s)`);
 }
 
 /**

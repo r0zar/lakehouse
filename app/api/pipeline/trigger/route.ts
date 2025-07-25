@@ -1,8 +1,11 @@
 // app/api/pipeline/trigger/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { runFullPipeline, runStagingPipeline, runMartsPipeline, runSpecificMarts } from '@/lib/transformation-pipeline';
+import { validateApiKey } from '@/lib/auth';
 
 export async function POST(request: NextRequest) {
+    const authError = validateApiKey(request);
+    if (authError) return authError;
     try {
         const { searchParams } = new URL(request.url);
         const stage = searchParams.get('stage') || 'full';
@@ -47,7 +50,10 @@ export async function POST(request: NextRequest) {
     }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+    const authError = validateApiKey(request);
+    if (authError) return authError;
+    
     return NextResponse.json({
         status: 'Pipeline trigger endpoint active',
         usage: {

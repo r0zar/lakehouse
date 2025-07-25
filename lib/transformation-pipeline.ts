@@ -1,5 +1,5 @@
 import { runTransformationPipeline } from '../test/helpers/transformation-runner';
-import { dataset } from './bigquery';
+import { dataset, bigquery } from './bigquery';
 
 /**
  * Define the full transformation pipeline
@@ -10,6 +10,11 @@ const TRANSFORMATION_PIPELINE = [
   {
     sqlFile: 'staging/stg_events.sql',
     destinationTable: 'stg_events',
+    writeDisposition: 'WRITE_TRUNCATE' as const // Full refresh for reliability
+  },
+  {
+    sqlFile: 'staging/stg_blocks.sql',
+    destinationTable: 'stg_blocks',
     writeDisposition: 'WRITE_TRUNCATE' as const // Full refresh for reliability
   },
   {
@@ -24,6 +29,21 @@ const TRANSFORMATION_PIPELINE = [
   },
   
   // Marts layer - business intelligence models
+  {
+    sqlFile: 'marts/dim_blocks.sql',
+    destinationTable: 'dim_blocks',
+    writeDisposition: 'WRITE_TRUNCATE' as const
+  },
+  {
+    sqlFile: 'marts/dim_transactions.sql',
+    destinationTable: 'dim_transactions',
+    writeDisposition: 'WRITE_TRUNCATE' as const
+  },
+  {
+    sqlFile: 'marts/fact_daily_activity.sql',
+    destinationTable: 'fact_daily_activity',
+    writeDisposition: 'WRITE_TRUNCATE' as const
+  },
   {
     sqlFile: 'marts/dim_defi_swaps.sql',
     destinationTable: 'dim_defi_swaps',
@@ -64,20 +84,27 @@ export async function runFullPipeline(): Promise<void> {
  * Execute only staging transformations (faster, for real-time updates)
  */
 export async function runStagingPipeline(): Promise<void> {
-  console.log('🔄 Starting real-time staging pipeline...');
+  const pipelineStartTime = Date.now();
+  console.log(`🔄 [${new Date().toISOString()}] Starting real-time staging pipeline...`);
   
   const stagingTransformations = TRANSFORMATION_PIPELINE.filter(t => 
     t.sqlFile.startsWith('staging/')
   );
   
+  console.log(`📊 Found ${stagingTransformations.length} staging transformations to run`);
+  
   try {
     // Use production dataset (crypto_data) unless test mode is enabled
     const datasetName = process.env.NODE_ENV === 'test' ? 'crypto_data_test' : (process.env.BIGQUERY_DATASET || 'crypto_data');
     console.log(`🔍 Using dataset: ${datasetName} (NODE_ENV: ${process.env.NODE_ENV})`);
+    
     await runTransformationPipeline(stagingTransformations, datasetName);
-    console.log('✅ Real-time staging pipeline completed successfully');
+    
+    const duration = Date.now() - pipelineStartTime;
+    console.log(`✅ [${new Date().toISOString()}] Real-time staging pipeline completed successfully (${duration}ms)`);
   } catch (error) {
-    console.error('❌ Staging pipeline failed:', error);
+    const duration = Date.now() - pipelineStartTime;
+    console.error(`❌ [${new Date().toISOString()}] Staging pipeline failed after ${duration}ms:`, error);
     throw error;
   }
 }
@@ -136,15 +163,16 @@ export async function runSpecificMarts(martNames: string[]): Promise<void> {
  * Check if we have recent data to transform
  */
 export async function hasRecentData(minutesThreshold: number = 5): Promise<boolean> {
+  const datasetName = process.env.NODE_ENV === 'test' ? 'crypto_data_test' : (process.env.BIGQUERY_DATASET || 'crypto_data');
   const thresholdTime = new Date(Date.now() - minutesThreshold * 60 * 1000).toISOString();
   
   const query = `
     SELECT COUNT(*) as recent_count
-    FROM \`${dataset.id}.events\`
+    FROM \`${datasetName}.events\`
     WHERE received_at >= '${thresholdTime}'
   `;
   
-  const [rows] = await dataset.query(query);
+  const [rows] = await bigquery.query(query);
   return rows[0]?.recent_count > 0;
 }
 
@@ -157,12 +185,12 @@ export function detectRequiredMarts(sqlQuery: string): string[] {
   
   // Map table references to mart files
   const martMappings = {
+    'dim_blocks': 'dim_blocks',
+    'dim_transactions': 'dim_transactions',
     'fact_daily_activity': 'fact_daily_activity',
     'dim_defi_swaps': 'dim_defi_swaps', 
-    'fact_defi_metrics': 'fact_defi_metrics',
     'dim_smart_contract_activity': 'dim_smart_contract_activity',
-    'dim_transactions': 'dim_transactions',
-    'dim_blocks': 'dim_blocks'
+    'fact_defi_metrics': 'fact_defi_metrics'
   };
   
   // Check which marts are referenced in the query
@@ -180,7 +208,7 @@ export function detectRequiredMarts(sqlQuery: string): string[] {
  */
 export async function isStagingFresh(minutesThreshold: number = 10): Promise<boolean> {
   try {
-    const datasetName = process.env.NODE_ENV === 'test' ? 'crypto_data_test' : dataset.id;
+    const datasetName = process.env.NODE_ENV === 'test' ? 'crypto_data_test' : (process.env.BIGQUERY_DATASET || 'crypto_data');
     const thresholdTime = new Date(Date.now() - minutesThreshold * 60 * 1000).toISOString();
     
     // Check if any staging table has recent data
@@ -190,7 +218,7 @@ export async function isStagingFresh(minutesThreshold: number = 10): Promise<boo
       WHERE received_at >= '${thresholdTime}'
     `;
     
-    const [rows] = await dataset.query(query);
+    const [rows] = await bigquery.query(query);
     return rows[0]?.latest_staging_update !== null;
   } catch (error) {
     console.warn('Could not check staging freshness:', error);
@@ -203,13 +231,15 @@ export async function isStagingFresh(minutesThreshold: number = 10): Promise<boo
  */
 export async function getMartFreshness(): Promise<Record<string, Date | null>> {
   try {
-    const datasetName = process.env.NODE_ENV === 'test' ? 'crypto_data_test' : dataset.id;
+    const datasetName = process.env.NODE_ENV === 'test' ? 'crypto_data_test' : (process.env.BIGQUERY_DATASET || 'crypto_data');
     
     const martTables = [
+      'dim_blocks',
+      'dim_transactions',
       'fact_daily_activity',
       'dim_defi_swaps', 
-      'fact_defi_metrics',
-      'dim_smart_contract_activity'
+      'dim_smart_contract_activity',
+      'fact_defi_metrics'
     ];
     
     const freshness: Record<string, Date | null> = {};
@@ -222,7 +252,7 @@ export async function getMartFreshness(): Promise<Record<string, Date | null>> {
           WHERE table_id = '${tableName}'
         `;
         
-        const [rows] = await dataset.query(query);
+        const [rows] = await bigquery.query(query);
         if (rows.length > 0) {
           freshness[tableName] = new Date(parseInt(rows[0].last_modified_time));
         } else {
