@@ -38,18 +38,61 @@ export async function POST(request: NextRequest) {
         SELECT DISTINCT
           contract_address,
           MAX(last_seen) as last_seen,
-          COUNT(*) as transaction_count
+          COUNT(*) as transaction_count,
+          STRING_AGG(DISTINCT source, ', ') as discovery_sources
         FROM (
-          -- Extract any contract address from transaction descriptions
+          -- 1. Extract contracts from transaction descriptions
           SELECT 
             REGEXP_EXTRACT(description, r'(S[PM][0-9A-Z]{38,42}\\.[a-zA-Z0-9_-]+)') as contract_address,
-            received_at as last_seen
+            received_at as last_seen,
+            'tx_description' as source
           FROM crypto_data.stg_transactions
           WHERE REGEXP_CONTAINS(description, r'S[PM][0-9A-Z]{38,42}\\.[a-zA-Z0-9_-]+')
+          
+          UNION ALL
+          
+          -- 2. Extract contracts from address data (contract_identifier)
+          SELECT 
+            contract_identifier as contract_address,
+            received_at as last_seen,
+            'address_data' as source
+          FROM crypto_data.stg_addresses
+          WHERE contract_identifier IS NOT NULL
+            AND REGEXP_CONTAINS(contract_identifier, r'^S[PM][0-9A-Z]{38,42}\\.[a-zA-Z0-9_-]+$')
+          
+          UNION ALL
+          
+          -- 3. Extract contracts from event data (ft_asset_identifier)
+          SELECT 
+            SPLIT(ft_asset_identifier, '::')[SAFE_OFFSET(0)] as contract_address,
+            received_at as last_seen,
+            'ft_events' as source
+          FROM crypto_data.stg_events
+          WHERE ft_asset_identifier IS NOT NULL
+            AND CONTAINS_SUBSTR(ft_asset_identifier, '::')
+            AND REGEXP_CONTAINS(SPLIT(ft_asset_identifier, '::')[SAFE_OFFSET(0)], r'^S[PM][0-9A-Z]{38,42}\\.[a-zA-Z0-9_-]+$')
+          
+          UNION ALL
+          
+          -- 4. Extract contracts from address function calls
+          SELECT 
+            CONCAT(
+              SPLIT(contract_identifier, '.')[SAFE_OFFSET(0)], 
+              '.', 
+              SPLIT(contract_identifier, '.')[SAFE_OFFSET(1)]
+            ) as contract_address,
+            received_at as last_seen,
+            'function_calls' as source
+          FROM crypto_data.stg_addresses
+          WHERE contract_identifier IS NOT NULL
+            AND function_name IS NOT NULL
+            AND ARRAY_LENGTH(SPLIT(contract_identifier, '.')) >= 2
+            AND REGEXP_CONTAINS(SPLIT(contract_identifier, '.')[SAFE_OFFSET(0)], r'^S[PM][0-9A-Z]{38,42}$')
         )
         WHERE contract_address IS NOT NULL
           AND contract_address != ''
           AND REGEXP_CONTAINS(contract_address, r'^S[PM][0-9A-Z]{38,42}\\.[a-zA-Z0-9_-]+$')
+          AND LENGTH(contract_address) >= 42  -- Minimum valid contract address length
         GROUP BY contract_address
       ),
       new_contracts AS (
@@ -64,7 +107,7 @@ export async function POST(request: NextRequest) {
         contract_address,
         transaction_count,
         last_seen,
-        'discovered' as status,
+        CONCAT('discovered_from_', discovery_sources) as status,
         
         -- Essential Contract Analysis Columns
         CAST(NULL AS STRING) as source_code,
@@ -87,7 +130,7 @@ export async function POST(request: NextRequest) {
 
     const [discoveryJob] = await bigquery.query({
       query: discoverContractsQuery,
-      jobTimeoutMs: 60000, // 1 minute timeout for the discovery query
+      jobTimeoutMs: 180000, // 3 minute timeout for comprehensive discovery query
     });
 
     // Get count of newly discovered contracts
@@ -108,7 +151,7 @@ export async function POST(request: NextRequest) {
     const duration = Date.now() - startTime;
 
     console.log(`${jobName} completed successfully in ${duration}ms`);
-    console.log(`📊 Discovered ${newContractsCount} new contracts`);
+    console.log(`📊 Deep scan discovered ${newContractsCount} new contracts from 4 data sources`);
 
     // Revalidate contract-related endpoints 
     revalidatePath('/api/contracts');

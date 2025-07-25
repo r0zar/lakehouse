@@ -94,13 +94,11 @@ interface TokenInfo {
   }
 }
 
-const PopularTokens: TokenInfo[] = [
-  { symbol: 'STX', name: 'Stacks', color: 'bg-orange-500', image: 'https://charisma.rocks/stx-logo.png' },
-  { symbol: 'aeUSDC', name: 'USDC', color: 'bg-blue-500', image: 'https://cryptologos.cc/logos/usd-coin-usdc-logo.png' },
-  { symbol: 'sbtc-token', name: 'sBTC', color: 'bg-yellow-500', image: 'https://cryptologos.cc/logos/bitcoin-btc-logo.png' },
-  { symbol: 'usdh', name: 'USDH', color: 'bg-green-500', image: 'https://cryptologos.cc/logos/usd-coin-usdc-logo.png' },
-  { symbol: 'ststx', name: 'stSTX', color: 'bg-purple-500', image: 'https://charisma.rocks/stx-logo.png' },
-  { symbol: 'usda', name: 'USDA', color: 'bg-red-500', image: 'https://cryptologos.cc/logos/usd-coin-usdc-logo.png' }
+// Popular token colors for fallback
+const TokenColors = [
+  'bg-orange-500', 'bg-yellow-400', 'bg-amber-600', 
+  'bg-red-500', 'bg-blue-500', 'bg-green-500', 
+  'bg-purple-500', 'bg-pink-500', 'bg-indigo-500'
 ];
 
 function TokenButton({ token, isSelected, onClick }: {
@@ -117,7 +115,7 @@ function TokenButton({ token, isSelected, onClick }: {
         }`}
     >
       {/* Token Image/Icon */}
-      <div className={`w-12 h-12 rounded-lg flex items-center justify-center text-white font-bold ${!token.image_url && token.color}`}>
+      <div className={`w-12 h-12 rounded-lg flex items-center justify-center text-white font-bold ${!(token.metadata?.image_url || token.image) ? token.color : ''}`}>
         {(token.metadata?.image_url || token.image) ? (
           <img
             src={token.metadata?.image_url || token.image}
@@ -421,7 +419,35 @@ export default function TokenBuyersAndSellersPage() {
   const [tokenMetadata, setTokenMetadata] = useState<Map<string, any>>(new Map());
   const [offset, setOffset] = useState(0);
   const [viewMode, setViewMode] = useState<'cards' | 'treemap'>('cards');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showTokenDropdown, setShowTokenDropdown] = useState(false);
+  const [availableTokens, setAvailableTokens] = useState<any[]>([]);
+  const [popularTokens, setPopularTokens] = useState<TokenInfo[]>([]);
   const limit = 20; // Smaller batches for smoother loading
+
+  const fetchPopularTokens = async () => {
+    try {
+      const response = await fetch('/api/popular-tokens');
+      const result = await response.json();
+      
+      if (result.popular_tokens) {
+        const tokens = result.popular_tokens.map((token: any, index: number) => ({
+          symbol: token.contract_address,
+          name: token.token_name || token.token_symbol,
+          color: TokenColors[index % TokenColors.length],
+          image: token.image_url,
+          metadata: token
+        }));
+        setPopularTokens(tokens);
+      }
+    } catch (error) {
+      console.error('Failed to fetch popular tokens:', error);
+      // Fallback to STX only
+      setPopularTokens([
+        { symbol: 'STX', name: 'Stacks', color: 'bg-orange-500', image: 'https://charisma.rocks/stx-logo.png' }
+      ]);
+    }
+  };
 
   const fetchData = async (isLoadMore = false) => {
     try {
@@ -485,43 +511,55 @@ export default function TokenBuyersAndSellersPage() {
             metadataMap.set(token.key, token);
           }
 
-          // Special handling for common token variations
-          if (token.token_symbol === 'aeUSDC') {
-            metadataMap.set('USDC', token);
-          }
-          if (token.token_symbol === 'sbtc-token') {
-            metadataMap.set('sBTC', token);
-          }
-          if (token.token_symbol === 'ststx') {
-            metadataMap.set('stSTX', token);
-          }
         });
 
         setTokenMetadata(metadataMap);
 
-        // Update PopularTokens with metadata
-        PopularTokens.forEach(token => {
-          // Try multiple lookup strategies
-          let metadata = metadataMap.get(token.symbol);
-          if (!metadata) {
-            // Try by contract address or alternative symbol matching
-            for (const [key, value] of metadataMap.entries()) {
-              if (value.token_symbol === token.symbol ||
-                value.token_name?.toLowerCase().includes(token.name.toLowerCase()) ||
-                key.includes(token.symbol.toLowerCase())) {
-                metadata = value;
-                break;
-              }
+        // Populate available tokens for search (sorted by activity)
+        const tokensWithActivity = result.token_metadata
+          .filter(token => token.token_symbol || token.token_name)
+          .map(token => ({
+            contract_address: token.contract_address,
+            symbol: token.token_symbol || token.contract_address.split('.').pop(),
+            name: token.token_name || token.token_symbol || token.contract_address,
+            image_url: token.image_url,
+            decimals: token.decimals,
+            metadata: token
+          }))
+          .sort((a, b) => (b.metadata.transaction_count || 0) - (a.metadata.transaction_count || 0));
+        
+        // Add STX to the top
+        const allTokens = [
+          {
+            contract_address: 'STX',
+            symbol: 'STX', 
+            name: 'Stacks',
+            image_url: 'https://charisma.rocks/stx-logo.png',
+            decimals: 6,
+            metadata: { token_symbol: 'STX', token_name: 'Stacks' }
+          },
+          ...tokensWithActivity
+        ];
+        
+        setAvailableTokens(allTokens);
+
+        // Update popular tokens with metadata
+        setPopularTokens(prevTokens => 
+          prevTokens.map(token => {
+            let metadata = metadataMap.get(token.symbol);
+            if (!metadata) {
+              metadata = metadataMap.get(token.symbol);
             }
-          }
-          if (metadata) {
-            token.metadata = metadata;
-            // Use metadata image if available
-            if (metadata.image_url && !token.image) {
-              token.image = metadata.image_url;
+            if (metadata) {
+              return {
+                ...token,
+                metadata: metadata,
+                image: metadata.image_url || token.image
+              };
             }
-          }
-        });
+            return token;
+          })
+        );
       }
 
       if (isLoadMore) {
@@ -569,6 +607,22 @@ export default function TokenBuyersAndSellersPage() {
   useEffect(() => {
     fetchData(false);
   }, [selectedToken]);
+
+  useEffect(() => {
+    fetchPopularTokens();
+  }, []);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (showTokenDropdown && !(event.target as Element).closest('.token-search-container')) {
+        setShowTokenDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showTokenDropdown]);
 
   // Process data for treemap visualization
   const processTreemapData = () => {
@@ -672,7 +726,7 @@ export default function TokenBuyersAndSellersPage() {
     );
   }
 
-  const selectedTokenData = PopularTokens.find(t => t.symbol === selectedToken);
+  const selectedTokenData = popularTokens.find(t => t.symbol === selectedToken);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-green-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 p-8">
@@ -716,15 +770,85 @@ export default function TokenBuyersAndSellersPage() {
           <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
             Select Token
           </h2>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-            {PopularTokens.map((token) => (
-              <TokenButton
-                key={token.symbol}
-                token={token}
-                isSelected={selectedToken === token.symbol}
-                onClick={() => setSelectedToken(token.symbol)}
+          
+          {/* Popular Tokens */}
+          <div className="mb-6">
+            <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Popular Tokens</h3>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+              {popularTokens.map((token) => (
+                <TokenButton
+                  key={token.symbol}
+                  token={token}
+                  isSelected={selectedToken === token.symbol}
+                  onClick={() => setSelectedToken(token.symbol)}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Search for Any Token */}
+          <div className="relative token-search-container">
+            <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Search All Tokens</h3>
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Search by name or symbol..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onFocus={() => setShowTokenDropdown(true)}
+                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
-            ))}
+              <svg className="absolute right-3 top-3 h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              
+              {/* Dropdown */}
+              {showTokenDropdown && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg max-h-60 overflow-y-auto z-10">
+                  {availableTokens
+                    .filter(token => 
+                      searchQuery === '' || 
+                      token.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                      token.symbol.toLowerCase().includes(searchQuery.toLowerCase())
+                    )
+                    .slice(0, 20)
+                    .map((token) => (
+                      <button
+                        key={token.contract_address}
+                        onClick={() => {
+                          setSelectedToken(token.contract_address);
+                          setSearchQuery(token.name);
+                          setShowTokenDropdown(false);
+                        }}
+                        className="w-full px-4 py-3 text-left hover:bg-gray-100 dark:hover:bg-gray-600 flex items-center gap-3 border-b border-gray-100 dark:border-gray-600 last:border-b-0"
+                      >
+                        <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-600 flex items-center justify-center overflow-hidden">
+                          {token.image_url ? (
+                            <img src={token.image_url} alt={token.name} className="w-8 h-8 object-cover" />
+                          ) : (
+                            <span className="text-xs font-bold text-gray-600 dark:text-gray-300">
+                              {token.symbol.substring(0, 2).toUpperCase()}
+                            </span>
+                          )}
+                        </div>
+                        <div>
+                          <div className="font-medium text-gray-900 dark:text-white">{token.symbol}</div>
+                          <div className="text-sm text-gray-500 dark:text-gray-400">{token.name}</div>
+                        </div>
+                      </button>
+                    ))}
+                  {availableTokens.filter(token => 
+                    searchQuery === '' || 
+                    token.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    token.symbol.toLowerCase().includes(searchQuery.toLowerCase())
+                  ).length === 0 && (
+                    <div className="px-4 py-3 text-gray-500 dark:text-gray-400 text-center">
+                      No tokens found
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 

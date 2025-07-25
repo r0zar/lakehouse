@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
 
     console.log(`Starting ${jobName}...`);
 
-    // Discover new tokens from analyzed contracts and INSERT them (don't wipe existing table)
+    // Discover new tokens from ALL contracts and INSERT them (don't wipe existing table)
     const discoverTokensQuery = `
       INSERT INTO crypto_data.dim_tokens (
         contract_address,
@@ -33,46 +33,67 @@ export async function POST(request: NextRequest) {
         created_at,
         updated_at
       )
-      WITH analyzed_contracts AS (
+      WITH all_contracts AS (
         SELECT 
           contract_address,
-          transaction_count,
-          last_seen,
-          parsed_abi
+          COALESCE(transaction_count, 0) as transaction_count,
+          COALESCE(last_seen, created_at) as last_seen,
+          parsed_abi,
+          -- Also check source code for token patterns if ABI is not available
+          source_code
         FROM crypto_data.dim_contracts
-        WHERE analysis_status = 'analyzed'
-          AND parsed_abi IS NOT NULL
+        WHERE contract_address IS NOT NULL
       ),
       
       potential_tokens AS (
         SELECT 
           *,
-          -- Extract function names from parsed_abi
-          ARRAY(
-            SELECT JSON_EXTRACT_SCALAR(func, '$.name') 
-            FROM UNNEST(JSON_EXTRACT_ARRAY(parsed_abi, '$.functions')) AS func
-            WHERE JSON_EXTRACT_SCALAR(func, '$.name') IS NOT NULL
-          ) as function_names
+          -- Extract function names from parsed_abi when available
+          CASE 
+            WHEN parsed_abi IS NOT NULL THEN
+              ARRAY(
+                SELECT JSON_EXTRACT_SCALAR(func, '$.name') 
+                FROM UNNEST(JSON_EXTRACT_ARRAY(parsed_abi, '$.functions')) AS func
+                WHERE JSON_EXTRACT_SCALAR(func, '$.name') IS NOT NULL
+              )
+            ELSE []
+          END as function_names,
           
-        FROM analyzed_contracts
+          -- Check source code for token patterns when ABI is not available
+          CASE 
+            WHEN source_code IS NOT NULL THEN (
+              REGEXP_CONTAINS(source_code, r'(?i)\b(transfer|get-balance|get-total-supply)\b') AND
+              REGEXP_CONTAINS(source_code, r'(?i)\b(token|ft|sip-?010)\b')
+            )
+            ELSE false
+          END as has_token_patterns_in_source
+          
+        FROM all_contracts
       ),
       
       token_analysis AS (
         SELECT 
           *,
-          -- Check for minimum token functions
-          (
-            'transfer' IN UNNEST(function_names) AND
-            'get-balance' IN UNNEST(function_names) AND
-            'get-total-supply' IN UNNEST(function_names)
-          ) as has_minimum_token_functions,
+          -- Check for minimum token functions (from ABI or source code patterns)
+          CASE 
+            WHEN ARRAY_LENGTH(function_names) > 0 THEN (
+              'transfer' IN UNNEST(function_names) AND
+              'get-balance' IN UNNEST(function_names) AND
+              'get-total-supply' IN UNNEST(function_names)
+            )
+            ELSE has_token_patterns_in_source
+          END as has_minimum_token_functions,
           
-          -- Count SIP-010 functions present  
-          (
-            SELECT COUNT(*)
-            FROM UNNEST(['get-name', 'get-symbol', 'get-decimals', 'get-total-supply', 'get-token-uri', 'transfer', 'get-balance']) AS required_func
-            WHERE required_func IN UNNEST(function_names)
-          ) as sip010_function_count
+          -- Count SIP-010 functions present (only meaningful for ABI-based detection)
+          CASE 
+            WHEN ARRAY_LENGTH(function_names) > 0 THEN (
+              SELECT COUNT(*)
+              FROM UNNEST(['get-name', 'get-symbol', 'get-decimals', 'get-total-supply', 'get-token-uri', 'transfer', 'get-balance']) AS required_func
+              WHERE required_func IN UNNEST(function_names)
+            )
+            WHEN has_token_patterns_in_source THEN 3 -- Assume partial token for source code matches
+            ELSE 0
+          END as sip010_function_count
           
         FROM potential_tokens
       ),
@@ -89,10 +110,12 @@ export async function POST(request: NextRequest) {
       SELECT 
         contract_address,
         
-        -- Token Classification
+        -- Token Classification (enhanced for source code detection)
         CASE 
           WHEN sip010_function_count >= 5 AND has_minimum_token_functions THEN 'sip010_token'
           WHEN sip010_function_count >= 3 AND has_minimum_token_functions THEN 'partial_token'
+          WHEN has_token_patterns_in_source AND ARRAY_LENGTH(function_names) = 0 THEN 'source_detected_token'
+          WHEN has_minimum_token_functions THEN 'basic_token'
           ELSE 'unknown'
         END as token_type,
         
@@ -143,7 +166,7 @@ export async function POST(request: NextRequest) {
     const duration = Date.now() - startTime;
 
     console.log(`${jobName} completed successfully in ${duration}ms`);
-    console.log(`📊 Discovered ${newTokensCount} new tokens`);
+    console.log(`📊 Discovered ${newTokensCount} new tokens from expanded contract scan`);
 
     // Revalidate token-related endpoints 
     revalidatePath('/api/tokens');

@@ -59,6 +59,10 @@
     {
       "path": "/api/cron/refresh-token-metadata",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/refresh-popular-tokens",
+      "schedule": "0 6 * * *"
     }
   ]
 }

@@ -109,7 +109,7 @@ async function analyzeContracts(): Promise<any> {
           try {
             const analysisResult = await Promise.race([
               analyzeContract(row.contract_address),
-              new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 12000)) // Longer timeout for API stability
+              new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 300000)) // 5 minute timeout for large batches
             ]);
             
             return { contract_address: row.contract_address, analysis: analysisResult, error: null };
@@ -187,7 +187,7 @@ async function analyzeContract(contractAddress: string): Promise<any> {
     // Get contract info with parsed ABI with reasonable timeout  
     const info = await Promise.race([
       getContractInfoWithParsedAbi(contractAddress),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('API timeout')), 10000))
+      new Promise((_, reject) => setTimeout(() => reject(new Error('API timeout')), 300000))
     ]);
 
     // If no contract info received, return null to mark as failed

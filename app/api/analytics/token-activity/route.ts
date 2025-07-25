@@ -242,10 +242,30 @@ export async function GET(request: NextRequest) {
           return formatStxAmount(amount);
         }
         
-        // Find token metadata by symbol
+        // Find token metadata by exact symbol match first
         for (const [contractId, metadata] of tokenMetadataMap) {
           if (metadata.token_symbol === tokenSymbol) {
             return formatTokenAmount(amount, metadata.decimals || 0);
+          }
+        }
+        
+        // Create mapping for common other_token values to actual token symbols
+        const tokenMappings: Record<string, string> = {
+          'usdh': 'sUSDh',
+          'sbtc-token': 'sBTC', 
+          'aeUSDC': 'aeUSDC',
+          'velar': 'VELAR',
+          'welsh': 'welsh',
+          'roo': 'roo'
+        };
+        
+        // Try mapped symbol
+        const mappedSymbol = tokenMappings[tokenSymbol];
+        if (mappedSymbol) {
+          for (const [contractId, metadata] of tokenMetadataMap) {
+            if (metadata.token_symbol === mappedSymbol) {
+              return formatTokenAmount(amount, metadata.decimals || 0);
+            }
           }
         }
         
@@ -433,8 +453,13 @@ export async function GET(request: NextRequest) {
     const totalBoughtAtomic = parseInt(summary.total_bought || '0');
     const totalSoldAtomic = parseInt(summary.total_sold || '0');
     
+    // Get token display name and symbol from metadata
+    const targetTokenMeta = tokenMetadataMap.get(token);
+    const displaySymbol = targetTokenMeta?.token_symbol || (token === 'STX' ? 'STX' : token);
+    const displayName = targetTokenMeta?.token_name || (token === 'STX' ? 'Stacks' : token);
+    
     const formattedSummary = {
-      token_name: token,
+      token_name: displayName,
       total_swaps_buying: parseInt(summary.total_swaps_buying || '0'),
       total_swaps_selling: parseInt(summary.total_swaps_selling || '0'),
       total_swaps: parseInt(summary.total_swaps || '0'),
@@ -448,10 +473,10 @@ export async function GET(request: NextRequest) {
       formatted_total_sold: token === 'STX' ? formatStxAmount(totalSoldAtomic) : formatTokenAmount(totalSoldAtomic, targetTokenDecimals),
       display_total_bought: token === 'STX' ? 
         `${formatStxAmount(totalBoughtAtomic).toFixed(6)} STX` : 
-        `${formatTokenAmount(totalBoughtAtomic, targetTokenDecimals).toFixed(targetTokenDecimals)} ${token}`,
+        `${formatTokenAmount(totalBoughtAtomic, targetTokenDecimals).toFixed(targetTokenDecimals)} ${displaySymbol}`,
       display_total_sold: token === 'STX' ? 
         `${formatStxAmount(totalSoldAtomic).toFixed(6)} STX` : 
-        `${formatTokenAmount(totalSoldAtomic, targetTokenDecimals).toFixed(targetTokenDecimals)} ${token}`
+        `${formatTokenAmount(totalSoldAtomic, targetTokenDecimals).toFixed(targetTokenDecimals)} ${displaySymbol}`
     };
 
     return NextResponse.json({
