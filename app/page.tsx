@@ -103,7 +103,7 @@ export default function Home() {
               </p>
             </div>
             <div className="flex gap-3 flex-wrap">
-              <a 
+              <a
                 href="/events"
                 className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors flex items-center gap-2"
               >
@@ -112,7 +112,7 @@ export default function Home() {
                 </svg>
                 View Events
               </a>
-              <a 
+              <a
                 href="/blocks"
                 className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors flex items-center gap-2"
               >
@@ -121,7 +121,7 @@ export default function Home() {
                 </svg>
                 View Blocks
               </a>
-              <a 
+              <a
                 href="/transactions"
                 className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors flex items-center gap-2"
               >
@@ -130,7 +130,7 @@ export default function Home() {
                 </svg>
                 View Transactions
               </a>
-              <a 
+              <a
                 href="/smart-events"
                 className="px-4 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700 transition-colors flex items-center gap-2"
               >
@@ -139,7 +139,7 @@ export default function Home() {
                 </svg>
                 Smart Events
               </a>
-              <a 
+              <a
                 href="/addresses"
                 className="px-4 py-2 bg-teal-600 text-white rounded-md hover:bg-teal-700 transition-colors flex items-center gap-2"
               >
@@ -149,7 +149,7 @@ export default function Home() {
                 </svg>
                 View Addresses
               </a>
-              <a 
+              <a
                 href="/analytics"
                 className="px-4 py-2 bg-pink-600 text-white rounded-md hover:bg-pink-700 transition-colors flex items-center gap-2"
               >
@@ -158,7 +158,7 @@ export default function Home() {
                 </svg>
                 Daily Activity
               </a>
-              <a 
+              <a
                 href="/contract-activity"
                 className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors flex items-center gap-2"
               >
@@ -167,7 +167,7 @@ export default function Home() {
                 </svg>
                 Contract Activity
               </a>
-              <a 
+              <a
                 href="/transaction-analytics"
                 className="px-4 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 transition-colors flex items-center gap-2"
               >
@@ -176,7 +176,7 @@ export default function Home() {
                 </svg>
                 Transaction Analytics
               </a>
-              <a 
+              <a
                 href="/block-analytics"
                 className="px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 transition-colors flex items-center gap-2"
               >
@@ -185,7 +185,7 @@ export default function Home() {
                 </svg>
                 Block Analytics
               </a>
-              <a 
+              <a
                 href="/smart-contract-analytics"
                 className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors flex items-center gap-2"
               >
@@ -194,7 +194,7 @@ export default function Home() {
                 </svg>
                 Smart Contract Analytics
               </a>
-              <a 
+              <a
                 href="/contracts"
                 className="px-4 py-2 bg-violet-600 text-white rounded-md hover:bg-violet-700 transition-colors flex items-center gap-2"
               >
@@ -203,7 +203,7 @@ export default function Home() {
                 </svg>
                 Contract Discovery
               </a>
-              <a 
+              <a
                 href="/tokens"
                 className="px-4 py-2 bg-cyan-600 text-white rounded-md hover:bg-cyan-700 transition-colors flex items-center gap-2"
               >
@@ -211,15 +211,6 @@ export default function Home() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
                 </svg>
                 Token Discovery
-              </a>
-              <a 
-                href="/cron-status"
-                className="px-4 py-2 bg-slate-600 text-white rounded-md hover:bg-slate-700 transition-colors flex items-center gap-2"
-              >
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Cron Jobs
               </a>
             </div>
           </div>
@@ -239,7 +230,7 @@ export default function Home() {
                 Unified token flow analysis across all DeFi router contracts - see what users actually spend and receive
               </p>
             </div>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Unified DeFi Flows */}
               <a
@@ -265,15 +256,15 @@ export default function Home() {
                   </svg>
                 </div>
                 <div className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-                  • All transfer events & transaction details<br/>
-                  • Cross-protocol: BitFlow, ALEX, Arkadiko, Charisma, Velar<br/>
+                  • All transfer events & transaction details<br />
+                  • Cross-protocol: BitFlow, ALEX, Arkadiko, Charisma, Velar<br />
                   • Structured JSON data for advanced analysis
                 </div>
               </a>
 
               {/* Token Activity */}
               <a
-                href="/token-activity"
+                href="/token-buyers-sellers"
                 className="group bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 border border-green-200 dark:border-green-700 rounded-lg p-6 hover:shadow-lg transition-all duration-200 hover:scale-105"
               >
                 <div className="flex items-center justify-between mb-4">
@@ -295,8 +286,8 @@ export default function Home() {
                   </svg>
                 </div>
                 <div className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-                  • Clear buy/sell actions by token<br/>
-                  • Easy-to-understand trade summaries<br/>
+                  • Clear buy/sell actions by token<br />
+                  • Easy-to-understand trade summaries<br />
                   • Popular token selector with statistics
                 </div>
               </a>
@@ -347,11 +338,10 @@ export default function Home() {
         {/* Quick Health Indicators */}
         <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 text-center">
-            <div className={`text-2xl font-bold mb-2 ${
-              pipelineStatus?.health.overall === 'healthy' 
-                ? 'text-green-600' 
+            <div className={`text-2xl font-bold mb-2 ${pipelineStatus?.health.overall === 'healthy'
+                ? 'text-green-600'
                 : 'text-red-600'
-            }`}>
+              }`}>
               {pipelineStatus?.health.overall === 'healthy' ? '✓' : '✗'}
             </div>
             <div className="text-sm text-gray-600 dark:text-gray-300">Pipeline Health</div>

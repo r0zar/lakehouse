@@ -18,6 +18,11 @@ interface SmartEvent {
   raw_event_data: any;
   received_at: string;
   webhook_path: string;
+  // Token metadata
+  token_symbol: string | null;
+  token_name: string | null;
+  decimals: number | null;
+  image_url: string | null;
 }
 
 interface SmartEventsResponse {
@@ -48,27 +53,34 @@ export async function GET(request: NextRequest) {
     
     const totalCount = parseInt(countRows[0]?.total_count || '0');
 
-    // Get paginated smart contract events
+    // Get paginated smart contract events with token metadata
     const eventsQuery = `
       SELECT 
-        event_id,
-        block_hash,
-        block_time,
-        tx_hash,
-        event_type,
-        position_index,
-        contract_identifier,
-        topic,
-        action,
-        ft_sender,
-        ft_recipient,
-        ft_amount,
-        ft_asset_identifier,
-        raw_event_data,
-        received_at,
-        webhook_path
-      FROM crypto_data.stg_events 
-      ORDER BY block_time DESC, position_index DESC
+        e.event_id,
+        e.block_hash,
+        e.block_time,
+        e.tx_hash,
+        e.event_type,
+        e.position_index,
+        e.contract_identifier,
+        e.topic,
+        e.action,
+        e.ft_sender,
+        e.ft_recipient,
+        e.ft_amount,
+        e.ft_asset_identifier,
+        e.raw_event_data,
+        e.received_at,
+        e.webhook_path,
+        -- Token metadata from dim_tokens table
+        t.token_symbol,
+        t.token_name,
+        t.decimals,
+        t.image_url
+      FROM crypto_data.stg_events e
+      LEFT JOIN crypto_data.dim_tokens t 
+        ON SPLIT(e.ft_asset_identifier, '::')[OFFSET(0)] = t.contract_address
+      ORDER BY e.block_time DESC, e.position_index DESC
       LIMIT ${limit} 
       OFFSET ${offset}
     `;
@@ -95,6 +107,11 @@ export async function GET(request: NextRequest) {
       raw_event_data: row.raw_event_data,
       received_at: row.received_at?.value || row.received_at,
       webhook_path: row.webhook_path,
+      // Token metadata
+      token_symbol: row.token_symbol,
+      token_name: row.token_name,
+      decimals: row.decimals ? parseInt(row.decimals) : null,
+      image_url: row.image_url,
     }));
 
     const response: SmartEventsResponse = {

@@ -10,11 +10,20 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '50');
     const offset = parseInt(searchParams.get('offset') || '0');
 
-    // Get token metadata for formatting
+    // Get token metadata for formatting - include all metadata fields
     const tokenMetadataQuery = `
-      SELECT contract_address, token_name, token_symbol, decimals, validation_status
+      SELECT 
+        contract_address, 
+        token_name, 
+        token_symbol, 
+        decimals, 
+        validation_status,
+        token_uri,
+        image_url,
+        description,
+        total_supply,
+        token_type
       FROM crypto_data.dim_tokens
-      WHERE validation_status = 'valid'
     `;
     
     const [tokenRows] = await bigquery.query({
@@ -453,6 +462,10 @@ export async function GET(request: NextRequest) {
         offset,
         count: formattedRows.length,
       },
+      token_metadata: Array.from(tokenMetadataMap.entries()).map(([key, value]) => ({
+        key,
+        ...value
+      })),
       formatting_info: {
         note: "Token amounts are formatted dynamically from atomic units using current token metadata",
         atomic_units_stored: true,

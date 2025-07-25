@@ -152,8 +152,8 @@ export default function TransactionAnalyticsPage() {
     return { isContractCall: false }
   }
 
-  const formatFee = (fee: number) => {
-    if (fee === 0) return '0 μSTX'
+  const formatFee = (fee: number | null | undefined) => {
+    if (!fee || fee === 0) return '0 μSTX'
     return `${fee.toLocaleString()} μSTX`
   }
 

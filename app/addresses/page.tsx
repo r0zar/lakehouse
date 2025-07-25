@@ -16,6 +16,13 @@ interface AddressOperation {
   function_args: any[] | null;
   webhook_path: string;
   received_at: string;
+  // Token metadata from linked FT transfers
+  ft_asset_identifier: string | null;
+  ft_amount: number | null;
+  token_symbol: string | null;
+  token_name: string | null;
+  decimals: number | null;
+  image_url: string | null;
 }
 
 interface AddressesResponse {
@@ -53,6 +60,23 @@ function ExpandedRow({ operation }: ExpandedRowProps) {
       operation_type: operation.operation_type,
       address: operation.address,
       amount: operation.amount,
+      // Include token information when available
+      token_transfer: operation.ft_asset_identifier ? {
+        asset_identifier: operation.ft_asset_identifier,
+        token_symbol: operation.token_symbol,
+        token_name: operation.token_name || (() => {
+          // Fallback: extract token name from contract address suffix
+          const contractAddress = operation.ft_asset_identifier.split('::')[0];
+          const suffix = contractAddress.split('.').pop();
+          return suffix ? suffix.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) : 'Unknown Token';
+        })(),
+        decimals: operation.decimals,
+        ft_amount: operation.ft_amount,
+        formatted_amount: operation.token_symbol && operation.decimals && operation.ft_amount ? 
+          `${(operation.ft_amount / Math.pow(10, operation.decimals)).toLocaleString(undefined, { 
+            maximumFractionDigits: Math.min(operation.decimals, 6) 
+          })} ${operation.token_symbol}` : null
+      } : null,
     },
     contract_interaction: operation.contract_identifier ? {
       contract_identifier: operation.contract_identifier,
@@ -135,15 +159,6 @@ export default function AddressesPage() {
 
   useEffect(() => {
     fetchAddresses(1);
-
-    // Auto-refresh every 30 seconds, but only for page 1 to show latest operations
-    const interval = setInterval(() => {
-      if (currentPage === 1) {
-        fetchAddresses(1);
-      }
-    }, 30000);
-
-    return () => clearInterval(interval);
   }, [currentPage]);
 
   const toggleExpanded = (operationKey: string) => {
@@ -156,22 +171,65 @@ export default function AddressesPage() {
 
   const truncateHash = (hash: string | null) => {
     if (!hash) return 'N/A';
-    return `${hash.substring(0, 8)}...${hash.substring(hash.length - 4)}`;
+    // Show more characters for better readability
+    return `${hash.substring(0, 10)}...${hash.substring(hash.length - 6)}`;
   };
 
   const truncateAddress = (address: string) => {
     if (!address) return 'N/A';
-    return `${address.substring(0, 6)}...${address.substring(address.length - 4)}`;
+
+    // Check if this is a contract address (contains a dot)
+    if (address.includes('.')) {
+      const parts = address.split('.');
+      if (parts.length === 2) {
+        const deployer = parts[0];
+        const contractName = parts[1];
+        const truncatedDeployer = deployer.length > 8 ?
+          `${deployer.substring(0, 6)}...${deployer.substring(deployer.length - 4)}` :
+          deployer;
+        return `${truncatedDeployer}.${contractName}`;
+      }
+    }
+
+    // Regular address truncation - show more characters for better readability
+    return `${address.substring(0, 8)}...${address.substring(address.length - 6)}`;
   };
 
-  const formatAmount = (amount: string | null) => {
-    if (!amount) return 'N/A';
-    try {
-      const num = parseFloat(amount);
-      return num.toLocaleString();
-    } catch {
-      return amount;
+  const formatAmount = (operation: AddressOperation) => {
+    if (!operation.amount) return 'N/A';
+
+    // If we have token metadata from linked FT transfer, prioritize ft_amount
+    if (operation.token_symbol && operation.decimals !== null && operation.ft_amount !== null) {
+      const divisor = Math.pow(10, operation.decimals);
+      const formattedAmount = operation.ft_amount / divisor;
+
+      return `${formattedAmount.toLocaleString(undefined, {
+        maximumFractionDigits: Math.min(operation.decimals, 6)
+      })} ${operation.token_symbol}`;
     }
+
+    // Fallback: if we have token metadata but no ft_amount, use operation amount
+    const num = parseFloat(operation.amount);
+    if (operation.token_symbol && operation.decimals !== null) {
+      const divisor = Math.pow(10, operation.decimals);
+      const formattedAmount = num / divisor;
+
+      return `${formattedAmount.toLocaleString(undefined, {
+        maximumFractionDigits: Math.min(operation.decimals, 6)
+      })} ${operation.token_symbol}`;
+    }
+
+    // Smart inference: if contract identifier looks like a known token, try to format appropriately
+    // General STX inference for large numbers
+    if (num >= 1000000 && (operation.operation_type === 'CREDIT' || operation.operation_type === 'DEBIT')) {
+      const stx = num / 1000000;
+      if (stx >= 0.001) {
+        return `${stx.toLocaleString(undefined, { maximumFractionDigits: 6 })} STX`;
+      }
+    }
+
+    // Fallback to raw number
+    return num.toLocaleString();
   };
 
   const getOperationTypeColor = (operationType: string) => {
@@ -231,7 +289,7 @@ export default function AddressesPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-4 sm:p-8">
-      <div className="container mx-auto">
+      <div className="mx-auto">
         <header className="mb-8">
           <div className="flex items-center justify-between mb-4">
             <div>
@@ -257,9 +315,6 @@ export default function AddressesPage() {
             <div className="flex items-center justify-between text-sm text-gray-600 dark:text-gray-400">
               <div>
                 Showing {((addressesData.page - 1) * addressesData.limit) + 1}-{Math.min(addressesData.page * addressesData.limit, addressesData.totalCount)} of {addressesData.totalCount.toLocaleString()} operations
-              </div>
-              <div>
-                {currentPage === 1 && 'Auto-refreshes every 30 seconds'}
               </div>
             </div>
           )}
@@ -325,18 +380,40 @@ export default function AddressesPage() {
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                           {operation.amount ? (
                             <motion.span
-                              className="px-2 py-1 bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 rounded-full text-xs font-medium inline-block"
+                              className="px-2 py-1 bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 rounded-full text-xs font-medium inline-flex items-center gap-1"
                               whileHover={{ scale: 1.05 }}
                               transition={{ duration: 0.2 }}
                             >
-                              {formatAmount(operation.amount)}
+                              {operation.image_url && (
+                                <img
+                                  src={operation.image_url}
+                                  alt={operation.token_symbol || 'Token'}
+                                  className="w-4 h-4 rounded-full object-cover"
+                                  onError={(e) => {
+                                    // Hide image if it fails to load
+                                    e.currentTarget.style.display = 'none';
+                                  }}
+                                />
+                              )}
+                              {formatAmount(operation)}
                             </motion.span>
                           ) : 'N/A'}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900 dark:text-gray-300">
                           {operation.contract_identifier ? (
-                            <span className="px-2 py-1 bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 rounded text-xs">
-                              {operation.contract_identifier.split('.').pop()}
+                            <span className="px-2 py-1 bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 rounded text-xs" title={operation.contract_identifier}>
+                              {(() => {
+                                const parts = operation.contract_identifier.split('.');
+                                if (parts.length === 2) {
+                                  const deployer = parts[0];
+                                  const contractName = parts[1];
+                                  const truncatedDeployer = deployer.length > 8 ?
+                                    `${deployer.substring(0, 6)}...${deployer.substring(deployer.length - 4)}` :
+                                    deployer;
+                                  return `${truncatedDeployer}.${contractName}`;
+                                }
+                                return operation.contract_identifier;
+                              })()}
                             </span>
                           ) : 'N/A'}
                         </td>

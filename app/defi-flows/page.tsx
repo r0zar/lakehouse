@@ -1,7 +1,8 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
-import { motion } from 'framer-motion'
+import React, { useState, useEffect, Fragment } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import Editor from '@monaco-editor/react'
 
 interface TokenEvent {
   event_type: string
@@ -14,6 +15,15 @@ interface TokenEvent {
   direction: 'outgoing' | 'incoming'
   counterparty: string
   counterparty_display: string
+  token_metadata?: {
+    contract_address?: string
+    token_symbol?: string
+    token_uri?: string
+    image_url?: string
+    description?: string
+    total_supply?: string
+    validation_status?: string
+  }
 }
 
 interface DeFiFlow {
@@ -61,6 +71,326 @@ interface DeFiFlowResponse {
   }
   router_breakdown: RouterBreakdown[]
   timestamp: string
+}
+
+interface ExpandedRowProps {
+  flow: DeFiFlow;
+}
+
+function ExpandedRow({ flow }: ExpandedRowProps) {
+  const [activeTab, setActiveTab] = useState<'overview' | 'tokens' | 'router' | 'analysis'>('overview');
+  
+  const formatTime = (timeStr: string | { value: string }) => {
+    const time = typeof timeStr === 'object' && timeStr?.value ? timeStr.value : timeStr
+    return new Date(time as string).toLocaleString()
+  }
+
+  const formatFee = (fee: number | undefined | null) => {
+    if (!fee) return '0 μSTX'
+    return `${fee.toLocaleString()} μSTX`
+  }
+
+  const tabs = [
+    { id: 'overview', label: 'Overview', icon: '📋' },
+    { id: 'tokens', label: 'Token Events', icon: '🪙', available: !!flow.token_events?.length },
+    { id: 'router', label: 'Router Details', icon: '🔄' },
+    { id: 'analysis', label: 'Full Data', icon: '📊' }
+  ];
+
+  const getStatusColor = (success: boolean) => {
+    return success 
+      ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+      : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+  };
+
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case 'overview':
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Transaction Information */}
+            <div className="space-y-4">
+              <h4 className="text-lg font-semibold text-gray-900 dark:text-white border-b border-gray-200 dark:border-gray-700 pb-2">
+                Transaction Information
+              </h4>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Transaction Hash</label>
+                  <p className="text-gray-900 dark:text-white font-mono text-sm break-all">{flow.tx_hash}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Status</label>
+                  <div>
+                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(flow.success)}`}>
+                      {flow.success ? 'Success' : 'Failed'}
+                    </span>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-500 dark:text-gray-400">User Address</label>
+                  <p className="text-gray-900 dark:text-white font-mono text-sm break-all">{flow.swap_user}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Block Time</label>
+                  <p className="text-gray-900 dark:text-white">{formatTime(flow.block_time)}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Transaction Metrics */}
+            <div className="space-y-4">
+              <h4 className="text-lg font-semibold text-gray-900 dark:text-white border-b border-gray-200 dark:border-gray-700 pb-2">
+                Transaction Metrics
+              </h4>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Transaction Fee</label>
+                  <p className="text-2xl font-bold text-orange-600 dark:text-orange-400">
+                    {flow.display_transaction_fee || formatFee(flow.transaction_fee)}
+                  </p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Tokens Involved</label>
+                  <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                    {flow.total_tokens_involved}
+                  </p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Token Events</label>
+                  <p className="text-2xl font-bold text-green-600 dark:text-green-400">
+                    {flow.token_events?.length || 0}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Router Summary */}
+            <div className="md:col-span-2 space-y-4">
+              <h4 className="text-lg font-semibold text-gray-900 dark:text-white border-b border-gray-200 dark:border-gray-700 pb-2">
+                Router Summary
+              </h4>
+              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Router Contract</label>
+                    <p className="text-gray-900 dark:text-white font-mono">{flow.router_name}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Function Called</label>
+                    <p className="text-gray-900 dark:text-white font-mono">{flow.router_function}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'tokens':
+        return (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Token Flow Events ({flow.token_events?.length || 0})
+              </h4>
+            </div>
+            {flow.token_events && flow.token_events.length > 0 ? (
+              <div className="space-y-2">
+                {flow.token_events.map((event, index) => (
+                  <div key={index} className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 border border-gray-200 dark:border-gray-600">
+                    <div className="flex items-center justify-between">
+                      {/* Left side: Direction, Token, and Amount */}
+                      <div className="flex items-center gap-3">
+                        {/* Token Image with fallback */}
+                        <div className="relative w-8 h-8 flex-shrink-0">
+                          {event.token_metadata?.image_url ? (
+                            <img 
+                              src={event.token_metadata.image_url} 
+                              alt={event.token_name} 
+                              className="w-8 h-8 rounded object-cover"
+                              onError={(e) => {
+                                e.currentTarget.style.display = 'none';
+                                const sibling = e.currentTarget.nextElementSibling as HTMLElement;
+                                if (sibling) sibling.style.display = 'flex';
+                              }}
+                            />
+                          ) : null}
+                          {/* Fallback icon */}
+                          <div className={`w-8 h-8 rounded flex items-center justify-center text-xs font-bold ${
+                            event.token_metadata?.image_url ? 'hidden' : 'flex'
+                          } ${
+                            event.token_name === 'STX' ? 'bg-orange-100 text-orange-600 dark:bg-orange-900 dark:text-orange-300' :
+                            'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+                          }`}>
+                            {event.token_metadata?.token_symbol?.substring(0, 2) || event.token_name.substring(0, 2)}
+                          </div>
+                        </div>
+                        
+                        {/* Direction Icon (small) */}
+                        <span className={`w-6 h-6 flex items-center justify-center rounded-full text-sm font-bold ${
+                          event.direction === 'outgoing' 
+                            ? 'bg-red-100 text-red-600 dark:bg-red-900 dark:text-red-300' 
+                            : 'bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-300'
+                        }`}>
+                          {event.direction === 'outgoing' ? '−' : '+'}
+                        </span>
+                        
+                        {/* Token and Amount */}
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-gray-900 dark:text-white">
+                            {event.display_amount || `${(event.formatted_amount || event.ft_amount).toLocaleString()} ${event.token_metadata?.token_symbol || event.token_name}`}
+                          </span>
+                          
+                          {/* Validation badge (compact) */}
+                          {event.token_metadata?.validation_status && event.token_metadata.validation_status !== 'unknown' && (
+                            <span className={`inline-flex w-2 h-2 rounded-full ${
+                              event.token_metadata.validation_status === 'completed' ? 'bg-green-500' :
+                              event.token_metadata.validation_status === 'pending' ? 'bg-yellow-500' :
+                              'bg-gray-400'
+                            }`} title={`Status: ${event.token_metadata.validation_status}`}>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {/* Right side: Counterparty */}
+                      <div className="text-right">
+                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                          {event.direction === 'outgoing' ? 'to' : 'from'}
+                        </div>
+                        <div className="text-sm font-mono text-gray-700 dark:text-gray-300">
+                          {event.counterparty_display}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                No token events recorded for this transaction
+              </div>
+            )}
+          </div>
+        );
+
+      case 'router':
+        return (
+          <div className="space-y-6">
+            <h4 className="text-lg font-semibold text-gray-900 dark:text-white">
+              Router Contract Details
+            </h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
+                <h5 className="font-medium text-gray-900 dark:text-white mb-3">Contract Information</h5>
+                <div className="space-y-2 text-sm">
+                  <div><strong>Router Name:</strong> {flow.router_name}</div>
+                  <div><strong>Function Called:</strong> {flow.router_function}</div>
+                  <div><strong>Transaction Status:</strong> <span className={flow.success ? 'text-green-600' : 'text-red-600'}>{flow.success ? 'Success' : 'Failed'}</span></div>
+                </div>
+              </div>
+              
+              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
+                <h5 className="font-medium text-gray-900 dark:text-white mb-3">Transaction Metrics</h5>
+                <div className="space-y-2 text-sm">
+                  <div><strong>Fee Paid:</strong> {flow.display_transaction_fee || formatFee(flow.transaction_fee)}</div>
+                  <div><strong>Tokens Involved:</strong> {flow.total_tokens_involved}</div>
+                  <div><strong>Events Count:</strong> {flow.token_events?.length || 0}</div>
+                </div>
+              </div>
+            </div>
+            
+            <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
+              <h5 className="font-medium text-gray-900 dark:text-white mb-3">User Information</h5>
+              <div className="text-sm">
+                <div><strong>Swap User:</strong> <span className="font-mono text-xs">{flow.swap_user}</span></div>
+                <div className="mt-2"><strong>Transaction Time:</strong> {formatTime(flow.block_time)}</div>
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'analysis':
+        return (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Complete Transaction Data
+              </h4>
+              <span className="text-sm text-gray-500 dark:text-gray-400">
+                JSON Format
+              </span>
+            </div>
+            <div className="border border-gray-300 dark:border-gray-600 rounded-lg overflow-hidden">
+              <Editor
+                height="600px"
+                defaultLanguage="json"
+                value={JSON.stringify(flow, null, 2)}
+                theme="vs-dark"
+                options={{
+                  readOnly: true,
+                  minimap: { enabled: true },
+                  scrollBeyondLastLine: false,
+                  wordWrap: 'on',
+                  automaticLayout: true,
+                  fontSize: 12,
+                  folding: true,
+                  lineNumbers: 'on',
+                  glyphMargin: false,
+                  lineDecorationsWidth: 0,
+                  lineNumbersMinChars: 4
+                }}
+              />
+            </div>
+          </div>
+        );
+
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <motion.div
+      className="bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700"
+      initial={{ opacity: 0, height: 0 }}
+      animate={{ opacity: 1, height: 'auto' }}
+      exit={{ opacity: 0, height: 0 }}
+      transition={{ duration: 0.3, ease: 'easeInOut' }}
+    >
+      <div className="bg-white dark:bg-gray-800 overflow-hidden">
+        {/* Tab Navigation */}
+        <div className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
+          <nav className="flex space-x-8 px-6" aria-label="Tabs">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                disabled={tab.available === false}
+                className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap flex items-center gap-2 ${
+                  activeTab === tab.id
+                    ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                    : tab.available === false
+                    ? 'border-transparent text-gray-400 dark:text-gray-600 cursor-not-allowed'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+                }`}
+              >
+                <span>{tab.icon}</span>
+                {tab.label}
+                {tab.available === false && (
+                  <span className="text-xs text-gray-400 dark:text-gray-600">(N/A)</span>
+                )}
+              </button>
+            ))}
+          </nav>
+        </div>
+
+        {/* Tab Content */}
+        <div className="p-6">
+          {renderTabContent()}
+        </div>
+      </div>
+    </motion.div>
+  );
 }
 
 export default function DeFiFlowsPage() {
@@ -335,119 +665,156 @@ export default function DeFiFlowsPage() {
           </div>
         )}
 
-        {/* Flows Cards */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-              Recent DeFi Token Flows
-            </h2>
-            <span className="text-sm text-gray-500 dark:text-gray-400">
-              {data?.data.length || 0} results
-            </span>
+        {/* DeFi Flows Table */}
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                DeFi Token Flows
+              </h2>
+              <span className="text-sm text-gray-500 dark:text-gray-400">
+                {data?.data.length || 0} results
+              </span>
+            </div>
           </div>
-
-          {data?.data.map((flow, index) => (
-            <motion.div
-              key={`${flow.tx_hash}-${index}`}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.05 }}
-              className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 hover:shadow-xl transition-shadow"
-            >
-              {/* Header */}
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div 
-                      className="font-mono text-sm text-blue-600 dark:text-blue-400 cursor-pointer hover:text-blue-800 dark:hover:text-blue-300 transition-colors"
-                      onClick={() => copyToClipboard(flow.tx_hash)}
-                      title="Click to copy full transaction hash"
-                    >
-                      {flow.tx_hash.substring(0, 12)}...
-                    </div>
-                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                      flow.success 
-                        ? 'text-green-800 bg-green-100 dark:text-green-200 dark:bg-green-900' 
-                        : 'text-red-800 bg-red-100 dark:text-red-200 dark:bg-red-900'
-                    }`}>
-                      {flow.success ? 'Success' : 'Failed'}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
-                    <span>Fee: {flow.display_transaction_fee || formatFee(flow.transaction_fee)}</span>
-                    <span>{formatTime(flow.block_time)}</span>
-                    <span>{flow.total_tokens_involved} tokens</span>
-                  </div>
-                </div>
-                <button
-                  onClick={() => toggleRowExpansion(flow.tx_hash)}
-                  className="flex items-center gap-1 px-3 py-1 text-xs bg-gray-100 dark:bg-gray-700 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-                >
-                  <svg 
-                    className={`h-3 w-3 transition-transform ${expandedRows.has(flow.tx_hash) ? 'rotate-90' : ''}`} 
-                    fill="none" 
-                    viewBox="0 0 24 24" 
-                    stroke="currentColor"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                  JSON
-                </button>
-              </div>
-
-              {/* Router Info */}
-              <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                <div className="text-sm font-medium text-gray-900 dark:text-white mb-1">
-                  {flow.router_name}
-                </div>
-                <div className="text-xs text-gray-500 dark:text-gray-400">
-                  {flow.router_function}
-                </div>
-              </div>
-
-              {/* Token Flow */}
-              <div className="space-y-2">
-                <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Token Flow</h4>
-                {flow.token_events && flow.token_events.length > 0 ? (
-                  <div className="grid gap-2">
-                    {flow.token_events.map((event, i) => (
-                      <div key={i} className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-700 rounded">
-                        <div className="flex items-center gap-2">
-                          <span className={`w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold ${
-                            event.direction === 'outgoing' 
-                              ? 'bg-red-100 text-red-600 dark:bg-red-900 dark:text-red-300' 
-                              : 'bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-300'
+          
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+              <thead className="bg-gray-50 dark:bg-gray-700">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Transaction
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Router
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Status
+                  </th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Fee
+                  </th>
+                  <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Tokens
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Time
+                  </th>
+                  <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                <AnimatePresence>
+                  {data?.data.map((flow, index) => (
+                    <Fragment key={`${flow.tx_hash}-${index}`}>
+                      <motion.tr
+                        className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -20 }}
+                        transition={{ duration: 0.2, delay: index * 0.02 }}
+                        onClick={() => toggleRowExpansion(flow.tx_hash)}
+                      >
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex flex-col">
+                            <div 
+                              className="text-sm font-mono text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 transition-colors"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                copyToClipboard(flow.tx_hash);
+                              }}
+                              title="Click to copy full transaction hash"
+                            >
+                              {flow.tx_hash.substring(0, 12)}...
+                            </div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400">
+                              <span className="font-medium">User:</span> 
+                              <span 
+                                className="font-mono cursor-pointer hover:text-gray-700 dark:hover:text-gray-300 ml-1"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  copyToClipboard(flow.swap_user);
+                                }}
+                                title="Click to copy user address"
+                              >
+                                {flow.swap_user.substring(0, 8)}...{flow.swap_user.substring(flow.swap_user.length - 4)}
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex flex-col">
+                            <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                              {flow.router_name.split('.').pop() || flow.router_name}
+                            </div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400">
+                              {flow.router_function}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                            flow.success 
+                              ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' 
+                              : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
                           }`}>
-                            {event.direction === 'outgoing' ? '−' : '+'}
+                            {flow.success ? 'Success' : 'Failed'}
                           </span>
-                          <span className="font-mono text-sm font-medium">
-                            {event.display_amount || `${(event.formatted_amount || event.ft_amount).toLocaleString()} ${event.token_name}`}
-                          </span>
-                        </div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400">
-                          {event.direction === 'outgoing' ? 'to' : 'from'} {event.counterparty_display}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-sm text-gray-500 dark:text-gray-400">No token events</div>
-                )}
-              </div>
-
-              {/* Expanded JSON */}
-              {expandedRows.has(flow.tx_hash) && (
-                <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-600">
-                  <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-2">
-                    Full Transaction Data
-                  </h4>
-                  <pre className="text-xs text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded p-3 overflow-x-auto">
-                    {JSON.stringify(flow, null, 2)}
-                  </pre>
-                </div>
-              )}
-            </motion.div>
-          ))}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-right">
+                          <div className="text-sm font-mono text-gray-900 dark:text-gray-100">
+                            {flow.display_transaction_fee || formatFee(flow.transaction_fee)}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-center">
+                          <div className="flex items-center justify-center space-x-1">
+                            <span className="text-sm font-bold text-blue-600 dark:text-blue-400">
+                              {flow.total_tokens_involved}
+                            </span>
+                            <span className="text-xs text-gray-500 dark:text-gray-400">
+                              ({flow.token_events?.length || 0} events)
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-500 dark:text-gray-400">
+                            {formatTime(flow.block_time)}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-center">
+                          <motion.button
+                            className="text-blue-600 hover:text-blue-900 dark:hover:text-blue-400 transition-colors"
+                            whileHover={{ scale: 1.1 }}
+                            whileTap={{ scale: 0.95 }}
+                          >
+                            {expandedRows.has(flow.tx_hash) ? (
+                              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                              </svg>
+                            ) : (
+                              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                              </svg>
+                            )}
+                          </motion.button>
+                        </td>
+                      </motion.tr>
+                      
+                      {expandedRows.has(flow.tx_hash) && (
+                        <tr key={`expanded-${flow.tx_hash}`}>
+                          <td colSpan={7} className="p-0">
+                            <ExpandedRow flow={flow} />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  ))}
+                </AnimatePresence>
+              </tbody>
+            </table>
+          </div>
 
           {(!data?.data || data.data.length === 0) && (
             <div className="text-center py-12 text-gray-500 dark:text-gray-400">

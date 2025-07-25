@@ -23,26 +23,11 @@ export async function GET(request: NextRequest) {
     const query = `
       SELECT 
         contract_address,
-        deployer_address,
-        contract_name,
         transaction_count,
         last_seen,
         status,
-        
-        -- Contract Analysis Fields
-        contract_interface,
-        interface_functions,
-        interface_function_count,
-        contract_info,
-        source_code_length,
-        deployment_tx_id,
-        deployment_block_height,
-        canonical,
-        analysis_status,
-        analysis_errors,
-        analyzed_at,
-        analysis_duration_ms,
-        
+        source_code,
+        parsed_abi,
         created_at,
         updated_at
       FROM crypto_data.dim_contracts

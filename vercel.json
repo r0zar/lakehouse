@@ -9,7 +9,7 @@
       "schedule": "* * * * *"
     },
     {
-      "path": "/api/cron/refresh-blocks", 
+      "path": "/api/cron/refresh-blocks",
       "schedule": "* * * * *"
     },
     {
@@ -37,16 +37,28 @@
       "schedule": "*/15 * * * *"
     },
     {
-      "path": "/api/cron/refresh-dim-contracts",
-      "schedule": "0 */4 * * *"
+      "path": "/api/cron/discover-contracts",
+      "schedule": "* * * * *"
     },
     {
-      "path": "/api/cron/refresh-dim-tokens",
-      "schedule": "0 */4 * * *"
+      "path": "/api/cron/analyze-contracts",
+      "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron/discover-tokens",
+      "schedule": "30 * * * *"
+    },
+    {
+      "path": "/api/cron/analyze-tokens",
+      "schedule": "*/15 * * * *"
     },
     {
       "path": "/api/cron/refresh-fact-defi-metrics",
       "schedule": "0 */4 * * *"
+    },
+    {
+      "path": "/api/cron/refresh-token-metadata",
+      "schedule": "0 * * * *"
     }
   ]
 }

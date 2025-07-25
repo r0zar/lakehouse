@@ -90,9 +90,21 @@ export default function BlockAnalyticsPage() {
   ) || []
 
   const formatFee = (fee: number | null) => {
-    if (fee === null || fee === undefined) return '0 μSTX'
-    if (fee === 0) return '0 μSTX'
-    return `${fee.toLocaleString()} μSTX`
+    if (fee === null || fee === undefined || fee === 0) return '0 STX'
+    
+    // Convert from microSTX to STX (divide by 1,000,000)
+    const stx = fee / 1000000
+    
+    // For very small amounts, show in μSTX
+    if (Math.abs(stx) < 0.001) {
+      return `${fee.toLocaleString()} μSTX`
+    }
+    
+    // For normal amounts, show in STX with appropriate decimal places
+    return `${stx.toLocaleString(undefined, { 
+      maximumFractionDigits: 6,
+      minimumFractionDigits: stx < 1 ? 3 : 2
+    })} STX`
   }
 
   const formatTime = (timeStr: string | { value: string }) => {

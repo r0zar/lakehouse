@@ -8,11 +8,20 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '50');
     const offset = parseInt(searchParams.get('offset') || '0');
 
-    // Get token metadata for formatting
+    // Get token metadata for formatting and display
     const tokenMetadataQuery = `
-      SELECT contract_address, token_name, token_symbol, decimals, validation_status
+      SELECT 
+        contract_address, 
+        token_name, 
+        token_symbol, 
+        decimals, 
+        validation_status,
+        token_uri,
+        image_url,
+        description,
+        total_supply,
+        token_type
       FROM crypto_data.dim_tokens
-      WHERE validation_status = 'valid'
     `;
     
     const [tokenRows] = await bigquery.query({
@@ -21,6 +30,7 @@ export async function GET(request: NextRequest) {
     });
     
     const tokenMetadataMap = createTokenMetadataMap(tokenRows);
+    
 
     // Simple query: just aggregate all transfers in/out for router transactions
     const query = `
@@ -124,6 +134,8 @@ export async function GET(request: NextRequest) {
               e.ft_amount,
               CASE WHEN e.event_type = 'STXTransferEvent' THEN 'STX' 
                    ELSE COALESCE(SPLIT(e.ft_asset_identifier, '::')[SAFE_OFFSET(1)], 'Unknown') END as token_name,
+              CASE WHEN e.event_type = 'STXTransferEvent' THEN 'STX' 
+                   ELSE e.ft_asset_identifier END as token_contract_address,
               CASE WHEN e.ft_sender = u.swap_user THEN 'outgoing' ELSE 'incoming' END as direction,
               CASE WHEN e.ft_sender = u.swap_user THEN e.ft_recipient ELSE e.ft_sender END as counterparty,
               -- Truncated counterparty for display
@@ -188,35 +200,83 @@ export async function GET(request: NextRequest) {
       const atomicFee = row.transaction_fee ? parseInt(row.transaction_fee) : null;
       const formattedFee = atomicFee ? formatStxAmount(atomicFee) : null;
       
-      // Format token events array
+      // Format token events array with full metadata
       const formattedTokenEvents = row.token_events?.map((event: any) => {
         let formattedAmount = null;
         let displayAmount = null;
         let decimals = 6; // Default
+        let tokenMetadata = null;
         
         if (event.ft_amount) {
-          if (event.token_name === 'STX') {
-            decimals = 6;
-            formattedAmount = formatStxAmount(event.ft_amount);
-            displayAmount = `${formattedAmount.toFixed(6)} STX`;
-          } else {
-            // Look up token metadata for proper formatting
-            const tokenKey = Array.from(tokenMetadataMap.keys()).find(key => 
-              key.includes(event.token_name) || 
-              tokenMetadataMap.get(key)?.token_symbol === event.token_name
-            );
+          // Look up token metadata by contract address first, then by name/symbol
+          let metadata = null;
+          
+          // For STX, use 'STX' as the contract address key
+          const lookupKey = event.token_name === 'STX' ? 'STX' : event.token_contract_address;
+          
+          
+          // Try exact contract address match first
+          if (lookupKey && lookupKey !== 'Unknown') {
+            metadata = tokenMetadataMap.get(lookupKey);
+          }
+          
+          // Fallback to name/symbol matching for non-STX tokens
+          if (!metadata && event.token_name !== 'STX') {
+            const tokenKey = Array.from(tokenMetadataMap.keys()).find(key => {
+              const tokenData = tokenMetadataMap.get(key);
+              return tokenData && (
+                key.includes(event.token_name) || 
+                tokenData.token_symbol === event.token_name ||
+                tokenData.token_name === event.token_name
+              );
+            });
             
             if (tokenKey) {
-              const metadata = tokenMetadataMap.get(tokenKey);
-              decimals = metadata?.decimals || 0;
-              formattedAmount = formatTokenAmount(event.ft_amount, decimals);
-              displayAmount = `${formattedAmount.toFixed(decimals === 0 ? 0 : 6)} ${metadata?.token_symbol || event.token_name}`;
-            } else {
-              // Unknown token - use 0 decimals (no decimal formatting)
-              decimals = 0;
-              formattedAmount = formatTokenAmount(event.ft_amount, 0);
-              displayAmount = `${formattedAmount.toFixed(0)} ${event.token_name}`;
+              metadata = tokenMetadataMap.get(tokenKey);
             }
+          }
+          
+          if (metadata) {
+            decimals = metadata.decimals || 0;
+            formattedAmount = formatTokenAmount(event.ft_amount, decimals);
+            
+            // Use full decimal precision for the token, but cap display at reasonable limit
+            const displayDecimals = decimals === 0 ? 0 : Math.min(decimals, 8);
+            // Format without scientific notation and remove trailing zeros
+            const formatted = formattedAmount.toFixed(displayDecimals);
+            const cleanFormatted = parseFloat(formatted).toLocaleString('en-US', {
+              minimumFractionDigits: 0,
+              maximumFractionDigits: displayDecimals,
+              useGrouping: false
+            });
+            displayAmount = `${cleanFormatted} ${metadata.token_symbol || event.token_name}`;
+            
+            // Include full metadata
+            tokenMetadata = {
+              contract_address: metadata.contract_address,
+              token_symbol: metadata.token_symbol,
+              token_name: metadata.token_name,
+              decimals: metadata.decimals,
+              validation_status: metadata.validation_status,
+              token_uri: metadata.token_uri,
+              image_url: metadata.image_url,
+              description: metadata.description,
+              total_supply: metadata.total_supply,
+              token_type: metadata.token_type
+            };
+          } else {
+            // Unknown token - use 0 decimals (no decimal formatting)
+            decimals = 0;
+            formattedAmount = formatTokenAmount(event.ft_amount, 0);
+            displayAmount = `${formattedAmount.toFixed(0)} ${event.token_name}`;
+            
+            tokenMetadata = {
+              contract_address: event.token_contract_address || 'Unknown',
+              token_symbol: event.token_name,
+              token_name: event.token_name,
+              decimals: 0,
+              validation_status: 'unknown'
+            };
           }
         }
         
@@ -225,7 +285,8 @@ export async function GET(request: NextRequest) {
           atomic_amount: event.ft_amount?.toString(),
           formatted_amount: formattedAmount,
           display_amount: displayAmount,
-          decimals: decimals
+          decimals: decimals,
+          token_metadata: tokenMetadata
         };
       }) || [];
       

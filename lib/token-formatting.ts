@@ -11,6 +11,12 @@ export interface TokenMetadata {
   token_symbol?: string;
   decimals?: number;
   validation_status?: string;
+  contract_address?: string;
+  token_uri?: string;
+  image_url?: string;
+  description?: string;
+  total_supply?: string;
+  token_type?: string;
 }
 
 /**
@@ -112,10 +118,16 @@ export function createTokenMetadataMap(tokenRows: any[]): Map<string, TokenMetad
     if (row.contract_address || row.contract_id) {
       const key = row.contract_address || row.contract_id;
       map.set(key, {
+        contract_address: row.contract_address,
         token_name: row.token_name,
         token_symbol: row.token_symbol,
         decimals: row.decimals,
-        validation_status: row.validation_status
+        validation_status: row.validation_status,
+        token_uri: row.token_uri,
+        image_url: row.image_url,
+        description: row.description,
+        total_supply: row.total_supply,
+        token_type: row.token_type
       });
     }
   }

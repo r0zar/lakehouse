@@ -21,6 +21,11 @@ interface SmartEvent {
   raw_event_data: any;
   received_at: string;
   webhook_path: string;
+  // Token metadata
+  token_symbol: string | null;
+  token_name: string | null;
+  decimals: number | null;
+  image_url: string | null;
 }
 
 interface SmartEventsResponse {
@@ -57,6 +62,23 @@ function ExpandedRow({ event }: ExpandedRowProps) {
       received_at: event.received_at,
     },
     event_data: parsedRawEventData,
+    // Include token information when available
+    token_transfer: event.ft_asset_identifier ? {
+      asset_identifier: event.ft_asset_identifier,
+      token_symbol: event.token_symbol,
+      token_name: event.token_name || (() => {
+        // Fallback: extract token name from contract address suffix
+        const contractAddress = event.ft_asset_identifier.split('::')[0];
+        const suffix = contractAddress.split('.').pop();
+        return suffix ? suffix.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) : 'Unknown Token';
+      })(),
+      decimals: event.decimals,
+      ft_amount: event.ft_amount,
+      formatted_amount: event.token_symbol && event.decimals && event.ft_amount ? 
+        `${(event.ft_amount / Math.pow(10, event.decimals)).toLocaleString(undefined, { 
+          maximumFractionDigits: Math.min(event.decimals, 6) 
+        })} ${event.token_symbol}` : null
+    } : null,
   };
 
   return (
@@ -129,15 +151,6 @@ export default function SmartEventsPage() {
 
   useEffect(() => {
     fetchEvents(1);
-
-    // Auto-refresh every 30 seconds, but only for page 1 to show latest events
-    const interval = setInterval(() => {
-      if (currentPage === 1) {
-        fetchEvents(1);
-      }
-    }, 30000);
-
-    return () => clearInterval(interval);
   }, [currentPage]);
 
   const toggleExpanded = (eventKey: string) => {
@@ -150,21 +163,34 @@ export default function SmartEventsPage() {
 
   const truncateHash = (hash: string | null) => {
     if (!hash) return 'N/A';
-    return `${hash.substring(0, 8)}...${hash.substring(hash.length - 4)}`;
+    // Show more characters for better readability
+    return `${hash.substring(0, 10)}...${hash.substring(hash.length - 6)}`;
   };
 
-  const formatAmount = (amount: number | null, asset: string | null) => {
-    if (amount === null) return 'N/A';
-    const assetName = asset ? asset.split('::').pop() || asset : 'tokens';
+  const formatAmount = (event: SmartEvent) => {
+    if (event.ft_amount === null) return 'N/A';
+    
+    // Use token metadata if available
+    if (event.token_symbol && event.decimals !== null) {
+      const divisor = Math.pow(10, event.decimals);
+      const formattedAmount = event.ft_amount / divisor;
+      
+      return `${formattedAmount.toLocaleString(undefined, { 
+        maximumFractionDigits: Math.min(event.decimals, 6) 
+      })} ${event.token_symbol}`;
+    }
+    
+    // Fallback to old logic for tokens without metadata
+    const assetName = event.ft_asset_identifier ? event.ft_asset_identifier.split('::').pop() || event.ft_asset_identifier : 'tokens';
     
     // Handle STX amounts (convert from atomic units)
     if (assetName === 'STX' || assetName === 'stx-token' || assetName === 'microSTX') {
-      const stx = amount / 1000000;
-      if (Math.abs(stx) < 0.001) return `${amount.toLocaleString()} μSTX`;
+      const stx = event.ft_amount / 1000000;
+      if (Math.abs(stx) < 0.001) return `${event.ft_amount.toLocaleString()} μSTX`;
       return `${stx.toLocaleString(undefined, { maximumFractionDigits: 6 })} STX`;
     }
     
-    return `${amount.toLocaleString()} ${assetName}`;
+    return `${event.ft_amount.toLocaleString()} ${assetName}`;
   };
 
   const getEventTypeColor = (eventType: string) => {
@@ -249,9 +275,6 @@ export default function SmartEventsPage() {
               <div>
                 Showing {((eventsData.page - 1) * eventsData.limit) + 1}-{Math.min(eventsData.page * eventsData.limit, eventsData.totalCount)} of {eventsData.totalCount.toLocaleString()} events
               </div>
-              <div>
-                {currentPage === 1 && 'Auto-refreshes every 30 seconds'}
-              </div>
             </div>
           )}
         </header>
@@ -309,8 +332,19 @@ export default function SmartEventsPage() {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900 dark:text-gray-300">
                           {event.contract_identifier ? (
-                            <span className="px-2 py-1 bg-indigo-100 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-200 rounded text-xs">
-                              {event.contract_identifier.split('.').pop()}
+                            <span className="px-2 py-1 bg-indigo-100 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-200 rounded text-xs" title={event.contract_identifier}>
+                              {(() => {
+                                const parts = event.contract_identifier.split('.');
+                                if (parts.length === 2) {
+                                  const deployer = parts[0];
+                                  const contractName = parts[1];
+                                  const truncatedDeployer = deployer.length > 8 ? 
+                                    `${deployer.substring(0, 6)}...${deployer.substring(deployer.length - 4)}` :
+                                    deployer;
+                                  return `${truncatedDeployer}.${contractName}`;
+                                }
+                                return event.contract_identifier;
+                              })()}
                             </span>
                           ) : 'N/A'}
                         </td>
@@ -320,11 +354,22 @@ export default function SmartEventsPage() {
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                           {event.ft_amount ? (
                             <motion.span
-                              className="px-2 py-1 bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 rounded-full text-xs font-medium inline-block"
+                              className="px-2 py-1 bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 rounded-full text-xs font-medium inline-flex items-center gap-1"
                               whileHover={{ scale: 1.05 }}
                               transition={{ duration: 0.2 }}
                             >
-                              {formatAmount(event.ft_amount, event.ft_asset_identifier)}
+                              {event.image_url && (
+                                <img 
+                                  src={event.image_url} 
+                                  alt={event.token_symbol || 'Token'} 
+                                  className="w-4 h-4 rounded-full object-cover"
+                                  onError={(e) => {
+                                    // Hide image if it fails to load
+                                    e.currentTarget.style.display = 'none';
+                                  }}
+                                />
+                              )}
+                              {formatAmount(event)}
                             </motion.span>
                           ) : 'N/A'}
                         </td>

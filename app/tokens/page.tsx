@@ -2,14 +2,11 @@
 
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import Editor from '@monaco-editor/react';
 
 interface Token {
   contract_address: string;
-  deployer_address: string;
-  contract_name: string;
   token_type: string;
-  sip010_function_count: number;
-  has_minimum_token_functions: boolean;
   token_name: string | null;
   token_symbol: string | null;
   decimals: number | null;
@@ -17,13 +14,11 @@ interface Token {
   token_uri: string | null;
   image_url: string | null;
   description: string | null;
-  validation_status: string;
-  validation_errors: string[] | null;
-  validated_at: string | null;
   transaction_count: number;
-  last_seen: string;
-  created_at: string;
-  updated_at: string;
+  last_seen: string | { value: string };
+  validation_status: string;
+  created_at?: string | { value: string };
+  updated_at?: string | { value: string };
 }
 
 interface TokensResponse {
@@ -39,16 +34,6 @@ interface TokensResponse {
     token_type: string | null;
     validation_status: string | null;
   };
-  statistics: {
-    total_tokens: number;
-    sip010_tokens: number;
-    partial_tokens: number;
-    validated_tokens: number;
-    pending_tokens: number;
-    failed_tokens: number;
-    avg_sip010_functions: number;
-    avg_transaction_count: number;
-  };
 }
 
 interface ExpandedRowProps {
@@ -56,32 +41,286 @@ interface ExpandedRowProps {
 }
 
 function ExpandedRow({ token }: ExpandedRowProps) {
-  const tokenDetails = {
-    token_metadata: {
-      name: token.token_name,
-      symbol: token.token_symbol,
-      decimals: token.decimals,
-      total_supply: token.total_supply,
-      token_uri: token.token_uri,
-      image_url: token.image_url,
-      description: token.description,
-    },
-    sip010_analysis: {
-      token_type: token.token_type,
-      sip010_function_count: token.sip010_function_count,
-      has_minimum_token_functions: token.has_minimum_token_functions,
-    },
-    validation_info: {
-      validation_status: token.validation_status,
-      validation_errors: token.validation_errors,
-      validated_at: token.validated_at,
-    },
-    contract_info: {
-      contract_address: token.contract_address,
-      deployer_address: token.deployer_address,
-      contract_name: token.contract_name,
-      transaction_count: token.transaction_count,
-      last_seen: token.last_seen,
+  const [activeTab, setActiveTab] = useState<'overview' | 'metadata' | 'uri' | 'validation'>('overview');
+  
+  // Extract contract name from address (format: deployer.contract-name)
+  const parts = token.contract_address.split('.');
+  const deployer_address = parts.length > 1 ? parts[0] : '';
+  const contract_name = parts.length > 1 ? parts[1] : token.contract_address;
+
+  const tabs = [
+    { id: 'overview', label: 'Overview', icon: '📋' },
+    { id: 'metadata', label: 'Metadata', icon: '🏷️' },
+    { id: 'uri', label: 'Token URI', icon: '🔗', available: !!token.token_uri },
+    { id: 'validation', label: 'Validation', icon: '✅' }
+  ];
+
+  const formatDate = (dateString: string | { value: string } | undefined) => {
+    if (!dateString) return 'N/A';
+    const date = typeof dateString === 'object' && dateString?.value ? dateString.value : dateString;
+    return new Date(date as string).toLocaleString();
+  };
+
+  const truncateAddress = (address: string) => {
+    return `${address.substring(0, 12)}...${address.substring(address.length - 8)}`;
+  };
+
+  const getValidationStatusColor = (status: string) => {
+    switch (status.toLowerCase()) {
+      case 'completed': return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200';
+      case 'pending': return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200';
+      case 'failed': return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200';
+      default: return 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200';
+    }
+  };
+
+  const getTokenTypeColor = (type: string) => {
+    switch (type.toLowerCase()) {
+      case 'sip010_token': return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200';
+      case 'partial_token': return 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200';
+      default: return 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200';
+    }
+  };
+
+  const formatSupply = (supply: string | null, decimals: number | null) => {
+    if (!supply || !decimals) return supply || 'Unknown';
+    try {
+      const num = parseFloat(supply);
+      const formatted = num / Math.pow(10, decimals);
+      return formatted.toLocaleString(undefined, { maximumFractionDigits: Math.min(decimals, 6) });
+    } catch {
+      return supply;
+    }
+  };
+
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case 'overview':
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Token Information */}
+            <div className="space-y-4">
+              <h4 className="text-lg font-semibold text-gray-900 dark:text-white border-b border-gray-200 dark:border-gray-700 pb-2">
+                Token Information
+              </h4>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Token Name</label>
+                  <p className="text-gray-900 dark:text-white font-mono">{token.token_name || 'N/A'}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Symbol</label>
+                  <p className="text-gray-900 dark:text-white font-mono">{token.token_symbol || 'N/A'}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Type</label>
+                  <div>
+                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getTokenTypeColor(token.token_type)}`}>
+                      {token.token_type}
+                    </span>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Contract Address</label>
+                  <p className="text-gray-900 dark:text-white font-mono text-sm break-all">{token.contract_address}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Token Metrics */}
+            <div className="space-y-4">
+              <h4 className="text-lg font-semibold text-gray-900 dark:text-white border-b border-gray-200 dark:border-gray-700 pb-2">
+                Token Metrics
+              </h4>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Decimals</label>
+                  <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                    {token.decimals ?? 'N/A'}
+                  </p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Total Supply</label>
+                  <p className="text-gray-900 dark:text-white">
+                    {token.total_supply ? formatSupply(token.total_supply, token.decimals) : 'N/A'}
+                    {token.token_symbol && ` ${token.token_symbol}`}
+                  </p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Transaction Count</label>
+                  <p className="text-2xl font-bold text-green-600 dark:text-green-400">
+                    {token.transaction_count.toLocaleString()}
+                  </p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Last Activity</label>
+                  <p className="text-gray-900 dark:text-white">{formatDate(token.last_seen)}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Token Image */}
+            {token.image_url && (
+              <div className="md:col-span-2 space-y-4">
+                <h4 className="text-lg font-semibold text-gray-900 dark:text-white border-b border-gray-200 dark:border-gray-700 pb-2">
+                  Token Image
+                </h4>
+                <div className="flex items-center space-x-4">
+                  <img 
+                    src={token.image_url} 
+                    alt={token.token_name || 'Token'} 
+                    className="w-24 h-24 rounded-lg object-cover border border-gray-200 dark:border-gray-600"
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                    }}
+                  />
+                  <div>
+                    <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">Image URL:</p>
+                    <a 
+                      href={token.image_url} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 text-sm font-mono break-all"
+                    >
+                      {token.image_url}
+                    </a>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+
+      case 'metadata':
+        return (
+          <div className="space-y-6">
+            <h4 className="text-lg font-semibold text-gray-900 dark:text-white">
+              Token Metadata
+            </h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
+                <h5 className="font-medium text-gray-900 dark:text-white mb-3">Basic Information</h5>
+                <div className="space-y-2 text-sm">
+                  <div><strong>Name:</strong> {token.token_name || 'Not specified'}</div>
+                  <div><strong>Symbol:</strong> {token.token_symbol || 'Not specified'}</div>
+                  <div><strong>Decimals:</strong> {token.decimals ?? 'Not specified'}</div>
+                  <div><strong>Type:</strong> {token.token_type}</div>
+                </div>
+              </div>
+              
+              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
+                <h5 className="font-medium text-gray-900 dark:text-white mb-3">Supply Information</h5>
+                <div className="space-y-2 text-sm">
+                  <div><strong>Total Supply (Raw):</strong> {token.total_supply || 'Not specified'}</div>
+                  <div><strong>Total Supply (Formatted):</strong> {token.total_supply ? formatSupply(token.total_supply, token.decimals) : 'Not specified'}</div>
+                  <div><strong>Transaction Count:</strong> {token.transaction_count.toLocaleString()}</div>
+                </div>
+              </div>
+            </div>
+            
+            {token.description && (
+              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
+                <h5 className="font-medium text-gray-900 dark:text-white mb-3">Description</h5>
+                <p className="text-gray-700 dark:text-gray-300 text-sm">{token.description}</p>
+              </div>
+            )}
+          </div>
+        );
+
+      case 'uri':
+        return (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Token URI Data
+              </h4>
+              {token.token_uri && (
+                <a 
+                  href={token.token_uri} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 text-sm"
+                >
+                  Open URI →
+                </a>
+              )}
+            </div>
+            {token.token_uri ? (
+              <div className="border border-gray-300 dark:border-gray-600 rounded-lg overflow-hidden">
+                <Editor
+                  height="400px"
+                  defaultLanguage="json"
+                  value={`{
+  "token_uri": "${token.token_uri}",
+  "image_url": "${token.image_url || 'Not specified'}",
+  "description": "${token.description || 'Not specified'}",
+  "external_url": "Visit the token URI to see full metadata"
+}`}
+                  theme="vs-dark"
+                  options={{
+                    readOnly: true,
+                    minimap: { enabled: false },
+                    scrollBeyondLastLine: false,
+                    wordWrap: 'on',
+                    automaticLayout: true,
+                    fontSize: 12,
+                    folding: true,
+                    lineNumbers: 'on',
+                    glyphMargin: false,
+                    lineDecorationsWidth: 0,
+                    lineNumbersMinChars: 3
+                  }}
+                />
+              </div>
+            ) : (
+              <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                No Token URI available for this token
+              </div>
+            )}
+          </div>
+        );
+
+      case 'validation':
+        return (
+          <div className="space-y-6">
+            <h4 className="text-lg font-semibold text-gray-900 dark:text-white">
+              Token Validation Status
+            </h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
+                <h5 className="font-medium text-gray-900 dark:text-white mb-2">Validation Status</h5>
+                <span className={`inline-flex px-3 py-1 text-sm font-semibold rounded-full ${getValidationStatusColor(token.validation_status)}`}>
+                  {token.validation_status}
+                </span>
+              </div>
+              
+              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
+                <h5 className="font-medium text-gray-900 dark:text-white mb-2">Token Type</h5>
+                <span className={`inline-flex px-3 py-1 text-sm font-semibold rounded-full ${getTokenTypeColor(token.token_type)}`}>
+                  {token.token_type}
+                </span>
+              </div>
+            </div>
+            
+            <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
+              <h5 className="font-medium text-gray-900 dark:text-white mb-3">Timestamps</h5>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                <div>
+                  <strong>Created:</strong> {formatDate(token.created_at)}
+                </div>
+                <div>
+                  <strong>Last Updated:</strong> {formatDate(token.updated_at)}
+                </div>
+                <div>
+                  <strong>Last Activity:</strong> {formatDate(token.last_seen)}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+
+      default:
+        return null;
     }
   };
 
@@ -93,52 +332,42 @@ function ExpandedRow({ token }: ExpandedRowProps) {
       exit={{ opacity: 0, height: 0 }}
       transition={{ duration: 0.3, ease: 'easeInOut' }}
     >
-      <td colSpan={6} className="p-6">
+      <td colSpan={6} className="p-0">
         <motion.div
-          className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700"
+          className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 overflow-hidden"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.2, delay: 0.1 }}
         >
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Token Image and Basic Info */}
-            <div className="space-y-4">
-              {token.image_url && (
-                <div className="flex items-center space-x-4">
-                  <img 
-                    src={token.image_url} 
-                    alt={token.token_name || 'Token'} 
-                    className="w-16 h-16 rounded-full object-cover border-2 border-gray-200 dark:border-gray-600"
-                    onError={(e) => {
-                      e.currentTarget.style.display = 'none';
-                    }}
-                  />
-                  <div>
-                    <h4 className="text-lg font-semibold text-gray-900 dark:text-white">
-                      {token.token_name || token.contract_name}
-                    </h4>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      {token.token_symbol}
-                    </p>
-                  </div>
-                </div>
-              )}
-              
-              {token.description && (
-                <div>
-                  <h5 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description</h5>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">{token.description}</p>
-                </div>
-              )}
-            </div>
+          {/* Tab Navigation */}
+          <div className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
+            <nav className="flex space-x-8 px-6" aria-label="Tabs">
+              {tabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id as any)}
+                  disabled={tab.available === false}
+                  className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap flex items-center gap-2 ${
+                    activeTab === tab.id
+                      ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                      : tab.available === false
+                      ? 'border-transparent text-gray-400 dark:text-gray-600 cursor-not-allowed'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+                  }`}
+                >
+                  <span>{tab.icon}</span>
+                  {tab.label}
+                  {tab.available === false && (
+                    <span className="text-xs text-gray-400 dark:text-gray-600">(N/A)</span>
+                  )}
+                </button>
+              ))}
+            </nav>
+          </div>
 
-            {/* Detailed JSON */}
-            <div>
-              <h5 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Token Details</h5>
-              <pre className="text-xs text-gray-700 dark:text-gray-300 overflow-x-auto bg-gray-50 dark:bg-gray-900 p-3 rounded">
-                {JSON.stringify(tokenDetails, null, 2)}
-              </pre>
-            </div>
+          {/* Tab Content */}
+          <div className="p-6">
+            {renderTabContent()}
           </div>
         </motion.div>
       </td>
@@ -304,35 +533,6 @@ export default function TokensPage() {
             </a>
           </div>
 
-          {/* Statistics */}
-          {tokensData && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-              <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
-                <div className="text-2xl font-bold text-green-600 dark:text-green-400">
-                  {formatNumber(tokensData.statistics.sip010_tokens)}
-                </div>
-                <div className="text-sm text-gray-600 dark:text-gray-400">SIP-010 Tokens</div>
-              </div>
-              <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
-                <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                  {formatNumber(tokensData.statistics.validated_tokens)}
-                </div>
-                <div className="text-sm text-gray-600 dark:text-gray-400">Validated</div>
-              </div>
-              <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
-                <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
-                  {formatNumber(tokensData.statistics.partial_tokens)}
-                </div>
-                <div className="text-sm text-gray-600 dark:text-gray-400">Partial Tokens</div>
-              </div>
-              <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
-                <div className="text-2xl font-bold text-gray-600 dark:text-gray-400">
-                  {tokensData.statistics.avg_sip010_functions.toFixed(1)}
-                </div>
-                <div className="text-sm text-gray-600 dark:text-gray-400">Avg SIP-010 Functions</div>
-              </div>
-            </div>
-          )}
 
           {/* Filters */}
           <div className="mb-6 bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4">
@@ -412,7 +612,7 @@ export default function TokensPage() {
                     Type
                   </th>
                   <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                    SIP-010 Functions
+                    Decimals
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     Status
@@ -451,7 +651,10 @@ export default function TokensPage() {
                             )}
                             <div>
                               <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                                {token.token_name || token.contract_name}
+                                {token.token_name || (() => {
+                                  const parts = token.contract_address.split('.');
+                                  return parts.length > 1 ? parts[1] : token.contract_address;
+                                })()}
                               </div>
                               <div className="text-sm text-gray-500 dark:text-gray-400">
                                 {token.token_symbol}
@@ -469,7 +672,7 @@ export default function TokensPage() {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-center">
                           <div className="text-sm font-mono text-gray-900 dark:text-gray-100">
-                            {token.sip010_function_count}/7
+                            {token.decimals ?? 'N/A'}
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">

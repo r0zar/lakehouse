@@ -6,7 +6,7 @@ import { cvToValue, hexToCV } from "@stacks/transactions";
 
 // Create the client instance
 const apiClient = createClient({
-    headers: { 'x-api-key': process.env.HIRO_API_KEY }
+  headers: { 'x-api-key': process.env.HIRO_API_KEY }
 });
 
 /**
@@ -36,12 +36,12 @@ export async function callReadOnly(
 
     // Use proper Clarity parsing with @stacks/transactions
     const clarityResult = cvToValue(hexToCV(response.data.result));
-    
+
     // Extract the actual value from the Clarity result
     if (clarityResult && typeof clarityResult === 'object' && 'value' in clarityResult) {
       return clarityResult.value;
     }
-    
+
     return clarityResult;
   } catch (error) {
     console.error(`Error calling ${contractId}.${functionName}:`, error);
@@ -133,7 +133,8 @@ export async function getContractInfo(
     });
 
     if (!response.data) {
-      throw new Error(`Contract info API error: ${response.error}`);
+      const errorMsg = response.error ? JSON.stringify(response.error) : 'Unknown API error';
+      throw new Error(`Contract info API error: ${errorMsg}`);
     }
 
     return response.data;
@@ -142,8 +143,16 @@ export async function getContractInfo(
       console.warn(`Contract not found: ${contract_id}`);
       return null;
     }
+    if (error?.response?.status === 429) {
+      console.warn(`Rate limited for contract: ${contract_id}`);
+      return null;
+    }
+    if (error?.response?.status >= 500) {
+      console.warn(`Server error for contract: ${contract_id}`);
+      return null;
+    }
     console.error("Error fetching contract info:", error);
-    throw new Error("Failed to fetch contract info.");
+    return null; // Return null instead of throwing to continue processing other contracts
   }
 }
 

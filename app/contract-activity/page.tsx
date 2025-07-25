@@ -124,8 +124,39 @@ export default function ContractActivityPage() {
   ) || []
 
   const formatFee = (fee: number) => {
-    if (fee === 0) return '0 μSTX'
-    return `${fee.toLocaleString()} μSTX`
+    if (fee === 0) return '0 STX'
+    
+    // Convert from microSTX to STX (divide by 1,000,000)
+    const stx = fee / 1000000
+    
+    // For very small amounts, show in μSTX
+    if (Math.abs(stx) < 0.001) {
+      return `${fee.toLocaleString()} μSTX`
+    }
+    
+    // For normal amounts, show in STX with appropriate decimal places
+    return `${stx.toLocaleString(undefined, { 
+      maximumFractionDigits: 6,
+      minimumFractionDigits: stx < 1 ? 3 : 2
+    })} STX`
+  }
+
+  const formatTotalAmount = (amount: number) => {
+    if (amount === 0) return '0 STX'
+    
+    // Assume large amounts are in microSTX and need conversion
+    const stx = amount / 1000000
+    
+    // For very small amounts, show in μSTX
+    if (Math.abs(stx) < 0.001) {
+      return `${amount.toLocaleString()} μSTX`
+    }
+    
+    // For normal amounts, show in STX with appropriate decimal places
+    return `${stx.toLocaleString(undefined, { 
+      maximumFractionDigits: 6,
+      minimumFractionDigits: stx < 1 ? 3 : 2
+    })} STX`
   }
 
   const formatDate = (dateStr: string | { value: string }) => {
@@ -481,9 +512,11 @@ export default function ContractActivityPage() {
                                   <div>
                                     <div className="text-gray-500 dark:text-gray-400">Total Amount</div>
                                     <div className="text-gray-900 dark:text-white">
-                                      {typeof activity.total_amount_transferred === 'string'
-                                        ? parseInt(activity.total_amount_transferred).toLocaleString()
-                                        : activity.total_amount_transferred.toLocaleString()}
+                                      {formatTotalAmount(
+                                        typeof activity.total_amount_transferred === 'string'
+                                          ? parseInt(activity.total_amount_transferred)
+                                          : activity.total_amount_transferred
+                                      )}
                                     </div>
                                   </div>
                                   <div>
