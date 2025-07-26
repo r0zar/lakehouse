@@ -139,8 +139,8 @@ describe('Production Data Validation', () => {
   "description": "STX transfer",
   "fee": 2500,
   "operations": [
-    {"type": "credit", "amount": "1000000"},
-    {"type": "debit", "amount": "1000000"}
+    {"type": "credit", "amount": "10000000"},
+    {"type": "debit", "amount": "10000000"}
   ]
 }
 ```

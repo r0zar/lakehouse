@@ -1,6 +1,6 @@
 // app/api/webhook/[...path]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { processWebhook } from '@/lib/webhook-processor';
+import { dataset } from '@/lib/bigquery';
 
 export async function POST(
     request: NextRequest,
@@ -8,13 +8,19 @@ export async function POST(
 ) {
     const eventId = crypto.randomUUID();
     const resolvedParams = await params;
+    const bodyText = await request.text();
 
-    const result = await processWebhook(request, resolvedParams.path, eventId);
+    await dataset.table('chainhooks').insert([{
+        event_id: eventId,
+        received_at: new Date().toISOString(),
+        webhook_path: resolvedParams.path.join('/') || 'root',
+        body_json: bodyText,
+        headers: JSON.stringify(Object.fromEntries(request.headers.entries())),
+        url: request.url,
+        method: request.method
+    }]);
 
-    // Always return 200 to prevent webhook retries
-    return NextResponse.json(result, {
-        status: 200
-    });
+    return NextResponse.json({ ok: true, event_id: eventId }, { status: 200 });
 }
 
 // Handle other methods

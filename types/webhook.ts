@@ -1,4 +1,4 @@
-export interface WebhookEvent {
+export interface ChainhookEvent {
     event_id: string;
     received_at: string;
     webhook_path: string;
