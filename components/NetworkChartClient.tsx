@@ -196,7 +196,7 @@ export default function NetworkChartClient({
       {/* Controls overlay */}
       <div className="absolute top-4 left-4 z-20 bg-black bg-opacity-90 rounded-lg p-4 max-w-sm">
         <div className="text-white text-sm space-y-3">
-          <div className="font-bold text-lg mb-3 text-cyan-400">Charisma Explore</div>
+          <div className="font-bold text-lg mb-3 text-cyan-400">Lakehouse</div>
 
           <div className="space-y-3">
             <div>
