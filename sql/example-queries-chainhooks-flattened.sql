@@ -1,0 +1,1 @@
+SELECT * FROM `crypto-analytics-466908.crypto_data.chainhooks_flattened` WHERE TIMESTAMP_TRUNC(received_at, DAY) = TIMESTAMP("2025-07-25") LIMIT 1000

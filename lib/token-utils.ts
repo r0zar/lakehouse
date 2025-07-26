@@ -16,8 +16,8 @@ export interface TokenMetadata {
  * @returns Formatted token string
  */
 export function formatTokenAmount(
-  amount: number | string | null, 
-  decimals: number = 6, 
+  amount: number | string | null,
+  decimals: number = 6,
   symbol: string | null = null
 ): string {
   if (amount === null || amount === undefined) {
@@ -25,14 +25,14 @@ export function formatTokenAmount(
   }
 
   const numericAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
-  
+
   if (numericAmount === 0) {
     return symbol ? `0 ${symbol}` : '0';
   }
 
   // Convert from atomic units to display units
   const displayAmount = numericAmount / Math.pow(10, decimals);
-  
+
   // Format with appropriate precision
   let formattedAmount: string;
   if (displayAmount >= 1000000) {
@@ -67,15 +67,15 @@ export function formatTokenWithMetadata(
   }
 
   const metadata = tokenMetadata[contractAddress];
-  
+
   if (!metadata) {
     // No metadata available - show raw amount with contract address
     return `${amount || '0'} (${contractAddress})`;
   }
 
   return formatTokenAmount(
-    amount, 
-    metadata.decimals || 0, 
+    amount,
+    metadata.decimals || 0,
     metadata.token_symbol
   );
 }
@@ -96,7 +96,7 @@ export function getTokenDisplayInfo(
   }
 
   const metadata = tokenMetadata[contractAddress];
-  
+
   return {
     symbol: metadata?.token_symbol || null,
     name: metadata?.token_name || null,
