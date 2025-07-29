@@ -24,6 +24,7 @@ interface NetworkNode {
   dominantToken?: string;
   tokenFlows?: Record<string, any>;
   latestTransaction?: string | null;
+  earliestTransaction?: string | null;
 }
 
 interface NetworkLink {
@@ -54,9 +55,11 @@ export interface NetworkData {
 interface NetworkChart3DProps {
   data: NetworkData;
   hideIsolatedNodes?: boolean;
+  showParticles?: boolean;
+  onVisualizationReady?: () => void;
 }
 
-const NetworkChart3D: React.FC<NetworkChart3DProps> = ({ data, hideIsolatedNodes = true }) => {
+const NetworkChart3D: React.FC<NetworkChart3DProps> = ({ data, hideIsolatedNodes = true, showParticles = false, onVisualizationReady }) => {
   const fgRef = useRef<any>(null);
   const [dimensions, setDimensions] = useState({ width: 1200, height: 800 });
   const [isClient, setIsClient] = useState(false);
@@ -89,6 +92,7 @@ const NetworkChart3D: React.FC<NetworkChart3DProps> = ({ data, hideIsolatedNodes
 
   // Process data for 3D visualization - now much simpler since SQL does the heavy lifting
   const processedData = React.useMemo(() => {
+    console.log('Processing data - Raw input:', { nodeCount: data.nodes.length, linkCount: data.links.length });
     // Filter nodes based on hideIsolatedNodes setting
     let nodes = data.nodes;
     
@@ -122,16 +126,53 @@ const NetworkChart3D: React.FC<NetworkChart3DProps> = ({ data, hideIsolatedNodes
       nodes = nodes.filter(node => connectedNodeIds.has(node.name));
     }
 
-    // Process links with curvature and particles
-    const links = data.links.map((link, index) => ({
+    // Validate that all links reference existing nodes
+    const nodeIds = new Set(nodes.map(node => node.name));
+    const validLinks = data.links.filter(link => {
+      const sourceExists = nodeIds.has(link.source);
+      const targetExists = nodeIds.has(link.target);
+      if (!sourceExists || !targetExists) {
+        console.warn(`Filtered out link due to missing nodes - Source: ${link.source} (${sourceExists}), Target: ${link.target} (${targetExists})`);
+      }
+      return sourceExists && targetExists;
+    });
+
+    console.log(`Link validation: ${data.links.length} original -> ${validLinks.length} valid links`);
+
+    // Process links with curvature and particles - controlled by showParticles prop
+    const links = validLinks.map((link, index) => ({
       ...link,
-      curvature: 0.1 + (Math.random() * 0.2), // Gentler curvature between 0.1-0.3
-      rotation: (index * 0.3) % (Math.PI * 2), // Less rotation spread
-      particles: 1, // Reduced from 3 to 1 for better performance
+      curvature: 0.05 + (Math.random() * 0.1), // Even gentler curvature for better performance
+      rotation: (index * 0.2) % (Math.PI * 2), // Reduced rotation spread
+      particles: showParticles ? (link.value > 1e15 ? 2 : 1) : 0, // Show particles based on toggle and value
     }));
 
+    console.log('Final processed data:', { nodeCount: nodes.length, linkCount: links.length });
     return { nodes, links };
-  }, [data, hideIsolatedNodes]);
+  }, [data, hideIsolatedNodes, showParticles]);
+
+  // Pre-warm WebGL context and create common objects
+  useEffect(() => {
+    if (isClient && typeof window !== 'undefined') {
+      // Pre-create some common mesh objects to warm up the GPU
+      const categories = ['Wallet', 'Contract', 'System'];
+      categories.forEach(category => {
+        getCachedNodeObject(category, 4); // Pre-cache common node types
+      });
+    }
+  }, [isClient]);
+
+  // Signal when visualization is ready (after data processing and a short delay for rendering)
+  useEffect(() => {
+    if (processedData.nodes.length > 0 && onVisualizationReady) {
+      // Add a small delay to ensure the 3D graph has had time to initialize
+      const timer = setTimeout(() => {
+        onVisualizationReady();
+      }, 800); // Increased to 800ms to account for GPU warmup
+      
+      return () => clearTimeout(timer);
+    }
+  }, [processedData, onVisualizationReady]);
 
   // Color mapping for categories
   const getCategoryColor = (category: string) => {
@@ -146,31 +187,26 @@ const NetworkChart3D: React.FC<NetworkChart3DProps> = ({ data, hideIsolatedNodes
     return colors[category as keyof typeof colors] || '#6B7280';
   };
 
-  // Cached THREE.js object creation
+  // Cached THREE.js object creation with full mesh caching
   const getCachedNodeObject = (category: string, size: number = 4) => {
     if (typeof window === 'undefined') return null;
     
     const THREE = require('three');
     const cacheKey = `${category}_${size}`;
     
-    // Check if we already have this geometry cached
+    // Cache the complete mesh, not just geometry/material
     if (!geometryCache.current.has(cacheKey)) {
-      const geometry = new THREE.SphereGeometry(size * 0.5, 16, 12);
-      geometryCache.current.set(cacheKey, geometry);
-    }
-    
-    // Check if we already have this material cached
-    if (!materialCache.current.has(category)) {
+      const geometry = new THREE.SphereGeometry(size * 0.5, 12, 8); // Reduced segments for better performance
       const material = new THREE.MeshLambertMaterial({
         color: getCategoryColor(category)
       });
-      materialCache.current.set(category, material);
+      const mesh = new THREE.Mesh(geometry, material);
+      geometryCache.current.set(cacheKey, mesh);
     }
     
-    const geometry = geometryCache.current.get(cacheKey);
-    const material = materialCache.current.get(category);
-    
-    return new THREE.Mesh(geometry, material);
+    // Clone the cached mesh instead of creating new one
+    const cachedMesh = geometryCache.current.get(cacheKey);
+    return cachedMesh.clone();
   };
 
   // Generate and cache tooltip HTML
@@ -179,45 +215,75 @@ const NetworkChart3D: React.FC<NetworkChart3DProps> = ({ data, hideIsolatedNodes
     const tokenFlowsArray = Object.entries(node.tokenFlows || {});
     
     
-    const cacheKey = `${node.name}_${node.latestTransaction || 'no-date'}_${tokenFlowsArray.map((entry: any) => `${entry[0]}:${entry[1].inbound}:${entry[1].outbound}`).join('|')}`;
+    const cacheKey = `${node.name}_${node.earliestTransaction || 'no-earliest'}_${node.latestTransaction || 'no-latest'}_${tokenFlowsArray.map((entry: any) => `${entry[0]}:${entry[1].inbound}:${entry[1].outbound}`).join('|')}`;
     
     if (tooltipCache.current.has(cacheKey)) {
       return tooltipCache.current.get(cacheKey)!;
     }
 
-    // Format token flows for tooltip with color-coded directional arrows (show all tokens)
-    const tokenFlows = tokenFlowsArray
+    // Create aligned grid for token flows - sort by total activity
+    const sortedTokens = tokenFlowsArray
       .sort((a: any, b: any) => b[1].total - a[1].total)
-      .map((entry: any) => {
-        const [token, flow] = entry;
-        const hasInbound = flow.inbound > 0;
-        const hasOutbound = flow.outbound > 0;
-        
-        if (hasInbound && hasOutbound) {
-          // Show both if significant flows in both directions
-          return `
-            <div style="font-family: 'Courier New', monospace; margin-bottom: 2px;">
-              <div style="color: #00ff88; margin-bottom: 1px;">+ ${formatTokenAmount(flow.inbound, token)}</div>
-              <div style="color: #ff4444;">- ${formatTokenAmount(flow.outbound, token)}</div>
-            </div>
-          `;
-        } else if (hasInbound && flow.inbound > flow.outbound) {
-          // Primarily inbound
-          return `<div style="color: #00ff88; font-family: 'Courier New', monospace; margin-bottom: 2px;">+ ${formatTokenAmount(flow.inbound, token)}</div>`;
-        } else {
-          // Primarily outbound
-          return `<div style="color: #ff4444; font-family: 'Courier New', monospace; margin-bottom: 2px;">- ${formatTokenAmount(flow.outbound, token)}</div>`;
-        }
-      })
-      .join('');
+      .filter(([_, flow]: any) => flow.inbound > 0 || flow.outbound > 0);
 
-    const dateSection = node.latestTransaction ? (() => {
-      const date = new Date(node.latestTransaction);
-      return `
-        <div style="color: #8aa3b3; font-size: 10px; margin-bottom: 8px; font-family: 'Courier New', monospace;">
-          Latest: ${date.toLocaleDateString()} ${date.toLocaleTimeString()}
+    let tokenFlowsGrid = '';
+    if (sortedTokens.length > 0) {
+      // Create two-column grid with headers
+      tokenFlowsGrid = `
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 6px;">
+          <!-- Credits Column -->
+          <div>
+            <div style="color: #00ff88; font-size: 9px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; text-align: center; border-bottom: 1px solid rgba(0,255,136,0.3); padding-bottom: 2px;">
+              ◦ CREDITS ◦
+            </div>
+            ${sortedTokens.map(([token, flow]: any) => {
+              if (flow.inbound > 0) {
+                return `<div style="color: #00ff88; font-family: 'Courier New', monospace; font-size: 10px; margin-bottom: 3px; text-align: right; padding-right: 4px;">+ ${formatTokenAmount(flow.inbound, token)}</div>`;
+              } else {
+                return `<div style="height: 16px;"></div>`; // Spacer for alignment
+              }
+            }).join('')}
+          </div>
+          
+          <!-- Debits Column -->
+          <div>
+            <div style="color: #ff4444; font-size: 9px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; text-align: center; border-bottom: 1px solid rgba(255,68,68,0.3); padding-bottom: 2px;">
+              ◦ DEBITS ◦
+            </div>
+            ${sortedTokens.map(([token, flow]: any) => {
+              if (flow.outbound > 0) {
+                return `<div style="color: #ff4444; font-family: 'Courier New', monospace; font-size: 10px; margin-bottom: 3px; text-align: left; padding-left: 4px;">- ${formatTokenAmount(flow.outbound, token)}</div>`;
+              } else {
+                return `<div style="height: 16px;"></div>`; // Spacer for alignment
+              }
+            }).join('')}
+          </div>
         </div>
       `;
+    }
+
+    const dateSection = (node.earliestTransaction && node.latestTransaction) ? (() => {
+      const earliest = new Date(node.earliestTransaction);
+      const latest = new Date(node.latestTransaction);
+      
+      // If same day, show date range differently
+      const sameDay = earliest.toDateString() === latest.toDateString();
+      
+      if (sameDay) {
+        return `
+          <div style="color: #8aa3b3; font-size: 10px; margin-bottom: 8px; font-family: 'Courier New', monospace; text-align: center;">
+            ${earliest.toLocaleDateString()}<br>
+            ${earliest.toLocaleTimeString()} → ${latest.toLocaleTimeString()}
+          </div>
+        `;
+      } else {
+        return `
+          <div style="color: #8aa3b3; font-size: 10px; margin-bottom: 8px; font-family: 'Courier New', monospace; text-align: center;">
+            ${earliest.toLocaleDateString()} → ${latest.toLocaleDateString()}<br>
+            <span style="font-size: 9px; opacity: 0.8;">${earliest.toLocaleTimeString()} to ${latest.toLocaleTimeString()}</span>
+          </div>
+        `;
+      }
     })() : '';
 
     const html = `
@@ -251,10 +317,10 @@ const NetworkChart3D: React.FC<NetworkChart3DProps> = ({ data, hideIsolatedNodes
         </div>
         ${dateSection}
         <div style="margin-top: 8px;">
-          <div style="color: #00ff88; font-size: 9px; text-transform: uppercase; margin-bottom: 4px; letter-spacing: 1px;">
+          <div style="color: #00ff88; font-size: 9px; text-transform: uppercase; margin-bottom: 4px; letter-spacing: 1px; text-align: center;">
             ◦ TRANSACTION FLOWS ◦
           </div>
-          ${tokenFlows || `<div style="color: #00ff88; font-family: 'Courier New', monospace;">◦ ${formatTokenAmount(node.value, node.dominantToken)}</div>`}
+          ${tokenFlowsGrid || `<div style="color: #00ff88; font-family: 'Courier New', monospace; text-align: center;">◦ ${formatTokenAmount(node.value, node.dominantToken)}</div>`}
         </div>
         <div style="
           position: absolute;
@@ -343,8 +409,8 @@ const NetworkChart3D: React.FC<NetworkChart3DProps> = ({ data, hideIsolatedNodes
         backgroundColor="#000000"
         graphData={processedData}
 
-        // Warmup for better initial layout
-        warmupTicks={60}
+        // Optimized warmup - reduced for faster initial rendering
+        warmupTicks={30}
 
         // Node appearance
         nodeColor={(node: any) => getCategoryColor(node.category)}
@@ -359,10 +425,10 @@ const NetworkChart3D: React.FC<NetworkChart3DProps> = ({ data, hideIsolatedNodes
         linkCurveRotation="rotation"
         linkDirectionalArrowLength={0}
         linkDirectionalParticles="particles"
-        linkDirectionalParticleSpeed={0.01}
-        linkDirectionalParticleWidth={1.5}
+        linkDirectionalParticleSpeed={0.008} // Slightly slower for less GPU work
+        linkDirectionalParticleWidth={1.2} // Smaller particles
         linkDirectionalParticleColor="#00ff88"
-        linkDirectionalParticleResolution={4}
+        linkDirectionalParticleResolution={3} // Reduced resolution for better performance
 
         // Interactions
         onNodeClick={handleNodeClick}
@@ -370,13 +436,13 @@ const NetworkChart3D: React.FC<NetworkChart3DProps> = ({ data, hideIsolatedNodes
           document.body.style.cursor = node ? 'pointer' : 'default';
         }}
 
-        // Physics - tighter network with component clustering
-        d3AlphaDecay={0.02}
-        d3VelocityDecay={0.4}
+        // Physics - optimized for faster initial settling
+        d3AlphaDecay={0.05} // Increased from 0.02 for faster simulation settling
+        d3VelocityDecay={0.6} // Increased from 0.4 for faster dampening
         numDimensions={3}
         forceEngine="d3"
-        cooldownTicks={100}
-        cooldownTime={15000}
+        cooldownTicks={50} // Reduced from 100
+        cooldownTime={8000} // Reduced from 15000ms
 
         // Camera
         showNavInfo={false}

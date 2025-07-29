@@ -39,7 +39,13 @@ flow_pairs AS (
     -- Amount and asset details
     debit.amount_value as value,
     COALESCE(debit.asset_identifier, debit.currency_symbol, 'STX') as asset,
-    debit.currency_symbol
+    debit.currency_symbol,
+    
+    -- Priority scoring: prefer flows involving smart contracts
+    CASE 
+      WHEN debit.address LIKE '%.%' OR credit.address LIKE '%.%' THEN 1  -- Contract involved
+      ELSE 2  -- Wallet-to-wallet
+    END as flow_priority
     
   FROM operation_flows debit
   JOIN operation_flows credit 
@@ -55,9 +61,35 @@ flow_pairs AS (
   WHERE debit.address != credit.address  -- Exclude self-transfers
 ),
 
--- Use only the actual address-to-address flows
+-- Deduplicate flows, prioritizing contract-based flows over wallet-to-wallet
+prioritized_flows AS (
+  SELECT 
+    event_id,
+    received_at,
+    source,
+    target,
+    value,
+    asset,
+    currency_symbol,
+    ROW_NUMBER() OVER (
+      PARTITION BY event_id, currency_symbol, value 
+      ORDER BY flow_priority ASC, source ASC
+    ) as priority_rank
+  FROM flow_pairs
+),
+
+-- Use only the highest priority flows (prefer contract-based flows)
 all_flows AS (
-  SELECT * FROM flow_pairs
+  SELECT 
+    event_id,
+    received_at,
+    source,
+    target,
+    value,
+    asset,
+    currency_symbol
+  FROM prioritized_flows 
+  WHERE priority_rank = 1
 )
 
 SELECT 

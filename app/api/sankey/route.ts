@@ -7,11 +7,15 @@ export async function GET(request: Request) {
     const limit = searchParams.get('limit') || '1000';
     const asset = searchParams.get('asset');
     const minValue = searchParams.get('minValue') || '0';
+    const address = searchParams.get('address');
     
     // Build WHERE clause for links
     let whereClause = `WHERE value > ${minValue}`;
     if (asset) {
       whereClause += ` AND currency_symbol = '${asset}'`;
+    }
+    if (address) {
+      whereClause += ` AND (source = '${address}' OR target = '${address}')`;
     }
     
     // Execute both queries in parallel

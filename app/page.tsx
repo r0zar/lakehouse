@@ -6,6 +6,8 @@ interface HomeProps {
     minValue?: string;
     asset?: string;
     hideIsolated?: string;
+    address?: string;
+    showParticles?: string;
   }>;
 }
 
@@ -18,6 +20,16 @@ export default async function Home({ searchParams }: HomeProps) {
   const minValue = Math.max(0, parseFloat(params.minValue || '0'));
   const asset = params.asset || '';
   const hideIsolated = params.hideIsolated !== 'false'; // Default to true unless explicitly 'false'
+  const address = params.address || '';
+  
+  // Default particles based on limit and explicit URL param
+  let showParticles: boolean | undefined;
+  if (params.showParticles !== undefined) {
+    showParticles = params.showParticles === 'true';
+  } else {
+    // Auto-default: true for < 10k transactions, false for >= 10k
+    showParticles = limit < 10000;
+  }
 
   return (
     <NetworkChartClient
@@ -25,6 +37,8 @@ export default async function Home({ searchParams }: HomeProps) {
       initialMinValue={minValue}
       initialAsset={asset}
       initialHideIsolated={hideIsolated}
+      initialAddress={address}
+      initialShowParticles={showParticles}
     />
   );
 }

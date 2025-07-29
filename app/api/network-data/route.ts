@@ -47,6 +47,7 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '500');
     const minValue = parseFloat(searchParams.get('minValue') || '0');
     const asset = searchParams.get('asset') || '';
+    const address = searchParams.get('address') || '';
 
     // Validate parameters
     if (limit < 10 || limit > 100000) {
@@ -69,6 +70,11 @@ export async function GET(request: NextRequest) {
         OR UPPER(asset_class_identifier) LIKE UPPER('%${asset}%')
       )`;
       console.log(`Token filter applied: ${asset} - WHERE clause: ${whereClause}`);
+    }
+    if (address) {
+      // Filter for flows to/from the specified address (case-sensitive for Stacks addresses)
+      whereClause += ` AND (source = '${address}' OR target = '${address}')`;
+      console.log(`Address filter applied: ${address}`);
     }
 
     // Get cached token metadata
@@ -156,7 +162,8 @@ export async function GET(request: NextRequest) {
             token_symbol,
             SUM(value) as outbound_value,
             0 as inbound_value,
-            MAX(received_at) as latest_transaction
+            MAX(received_at) as latest_transaction,
+            MIN(received_at) as earliest_transaction
           FROM filtered_transactions
           GROUP BY source, token_symbol
           
@@ -167,7 +174,8 @@ export async function GET(request: NextRequest) {
             token_symbol,
             0 as outbound_value,
             SUM(value) as inbound_value,
-            MAX(received_at) as latest_transaction
+            MAX(received_at) as latest_transaction,
+            MIN(received_at) as earliest_transaction
           FROM filtered_transactions
           GROUP BY target, token_symbol
         ),
@@ -179,7 +187,9 @@ export async function GET(request: NextRequest) {
             SUM(inbound_value) as total_inbound,
             SUM(outbound_value + inbound_value) as total_value,
             MAX(latest_transaction) as latest_transaction,
-            FORMAT_TIMESTAMP('%Y-%m-%dT%H:%M:%E*SZ', MAX(latest_transaction)) as latest_transaction_iso
+            MIN(earliest_transaction) as earliest_transaction,
+            FORMAT_TIMESTAMP('%Y-%m-%dT%H:%M:%E*SZ', MAX(latest_transaction)) as latest_transaction_iso,
+            FORMAT_TIMESTAMP('%Y-%m-%dT%H:%M:%E*SZ', MIN(earliest_transaction)) as earliest_transaction_iso
           FROM node_aggregations
           GROUP BY node_name, token_symbol
         ),
@@ -206,14 +216,20 @@ export async function GET(request: NextRequest) {
             SELECT target as node_name FROM filtered_transactions
           )
         )
-        -- Return only nodes that appear in the filtered transactions
+        -- Return all nodes that appear in filtered transactions, with fallback for missing metadata
         SELECT 
           'node' as record_type,
-          n.name,
-          n.category,
+          nit.node_name as name,
+          COALESCE(n.category, 
+            CASE 
+              WHEN nit.node_name LIKE '%.%' THEN 'Contract'
+              ELSE 'Wallet' 
+            END
+          ) as category,
           COALESCE(dt.total_value, 0) as value,
           COALESCE(dt.dominant_token, 'UNKNOWN') as dominant_token,
-          COALESCE(ns.latest_transaction_iso, NULL) as latest_transaction,
+          MAX(ns.latest_transaction_iso) as latest_transaction,
+          MIN(ns.earliest_transaction_iso) as earliest_transaction,
           TO_JSON(ARRAY_AGG(
             STRUCT(
               ns.token_symbol,
@@ -226,11 +242,11 @@ export async function GET(request: NextRequest) {
           NULL as source, NULL as target, NULL as raw_value, NULL as asset,
           NULL as currency_symbol, NULL as decimals, NULL as token_symbol, NULL as asset_class_identifier,
           NULL as received_at, NULL as received_at_iso, NULL as total_count, NULL as oldest_iso, NULL as newest_iso
-        FROM \`crypto_data.sankey_nodes\` n
-        INNER JOIN nodes_in_transactions nit ON n.name = nit.node_name
-        LEFT JOIN dominant_tokens dt ON n.name = dt.node_name AND dt.rn = 1
-        LEFT JOIN node_summaries ns ON n.name = ns.node_name
-        GROUP BY n.name, n.category, dt.total_value, dt.dominant_token, ns.latest_transaction_iso
+        FROM nodes_in_transactions nit
+        LEFT JOIN \`crypto_data.sankey_nodes\` n ON nit.node_name = n.name
+        LEFT JOIN dominant_tokens dt ON nit.node_name = dt.node_name AND dt.rn = 1
+        LEFT JOIN node_summaries ns ON nit.node_name = ns.node_name
+        GROUP BY nit.node_name, n.category, dt.total_value, dt.dominant_token
         
         UNION ALL
         
@@ -238,7 +254,7 @@ export async function GET(request: NextRequest) {
         SELECT 
           'link' as record_type,
           NULL as name, NULL as category, NULL as value, NULL as dominant_token,
-          NULL as latest_transaction, NULL as token_flows,
+          NULL as latest_transaction, NULL as earliest_transaction, NULL as token_flows,
           source, target, raw_value, asset, currency_symbol, decimals, token_symbol, asset_class_identifier,
           received_at, received_at_iso, NULL as total_count, NULL as oldest_iso, NULL as newest_iso
         FROM filtered_transactions
@@ -249,7 +265,7 @@ export async function GET(request: NextRequest) {
         SELECT 
           'metadata' as record_type,
           NULL as name, NULL as category, NULL as value, NULL as dominant_token,
-          NULL as latest_transaction, NULL as token_flows,
+          NULL as latest_transaction, NULL as earliest_transaction, NULL as token_flows,
           NULL as source, NULL as target, NULL as raw_value, NULL as asset,
           NULL as currency_symbol, NULL as decimals, NULL as token_symbol, NULL as asset_class_identifier,
           NULL as received_at, NULL as received_at_iso, total_count, oldest_iso, newest_iso
@@ -268,6 +284,15 @@ export async function GET(request: NextRequest) {
     console.log(`API Debug: Found ${nodes.length} nodes, ${links.length} links`);
     const nodesWithFlows = nodes.filter((n: any) => n.token_flows && n.token_flows !== 'null');
     console.log(`API Debug: ${nodesWithFlows.length} nodes have token flows`);
+    
+    // Check for duplicate node names
+    const nodeNames = nodes.map((n: any) => n.name);
+    const uniqueNodeNames = [...new Set(nodeNames)];
+    if (nodeNames.length !== uniqueNodeNames.length) {
+      console.warn(`API Debug: Found ${nodeNames.length - uniqueNodeNames.length} duplicate nodes!`);
+      const duplicates = nodeNames.filter((name, index) => nodeNames.indexOf(name) !== index);
+      console.warn(`API Debug: Duplicate node names:`, [...new Set(duplicates)]);
+    }
 
     // Debug: Show sample token data to understand field usage
     if (links.length > 0) {
@@ -303,8 +328,19 @@ export async function GET(request: NextRequest) {
     }
 
     // Transform data for network graph
+    // First deduplicate nodes by name to ensure unique addresses
+    const uniqueNodes = nodes.reduce((acc: any[], current: any) => {
+      const existingNode = acc.find(node => node.name === current.name);
+      if (!existingNode) {
+        acc.push(current);
+      }
+      return acc;
+    }, []);
+    
+    console.log(`API Debug: After deduplication: ${uniqueNodes.length} unique nodes (was ${nodes.length})`);
+
     const networkData = {
-      nodes: nodes.map((d: any) => {
+      nodes: uniqueNodes.map((d: any) => {
         // Parse token flows from JSON string - use plain object instead of Map for JSON serialization
         let tokenFlows: Record<string, any> = {};
         if (d.token_flows) {
@@ -334,7 +370,8 @@ export async function GET(request: NextRequest) {
           val: 4, // Uniform size for all nodes
           dominantToken: d.dominant_token || 'UNKNOWN',
           tokenFlows: tokenFlows,
-          latestTransaction: d.latest_transaction || null
+          latestTransaction: d.latest_transaction || null,
+          earliestTransaction: d.earliest_transaction || null
         };
       }),
       links: links.map((d: any) => {
