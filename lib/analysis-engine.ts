@@ -249,7 +249,7 @@ export function generateWalletAnalysis(data: WalletData): string {
   
   const topCounterparty = data.top_counterparties[0];
   
-  let analysis = `This wallet exhibits the behavior of a **${classification}**, handling ${formatVolume(totalVolume)} across ${data.active_tokens} different tokens. `;
+  let analysis = `This wallet exhibits the behavior of a **${classification}**, ${classification === "Jeet" ? "fumbling" : "handling"} ${formatVolume(totalVolume)} across ${data.active_tokens} different tokens. `;
   
   // Add automated detection note
   if (data.avg_txs_per_day >= 100) {
