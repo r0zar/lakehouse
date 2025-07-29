@@ -423,7 +423,14 @@ export async function GET(request: NextRequest) {
       dateRange: dateRange
     };
 
-    return Response.json(networkData);
+    const response = Response.json(networkData);
+    
+    // Add caching headers - network data is expensive to compute, cache for 10 minutes
+    response.headers.set('Cache-Control', 'public, s-maxage=600, stale-while-revalidate=1200');
+    response.headers.set('CDN-Cache-Control', 'public, s-maxage=600');
+    response.headers.set('Vercel-CDN-Cache-Control', 'public, s-maxage=600');
+    
+    return response;
 
   } catch (error) {
     console.error('Error fetching network data:', error);

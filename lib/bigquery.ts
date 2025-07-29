@@ -48,6 +48,8 @@ try {
     }
 } catch (error) {
     console.error('Failed to parse Google Cloud credentials:', error);
+    console.error('GOOGLE_CLOUD_CREDENTIALS length:', process.env.GOOGLE_CLOUD_CREDENTIALS?.length);
+    console.error('GOOGLE_CLOUD_CREDENTIALS starts with {:', process.env.GOOGLE_CLOUD_CREDENTIALS?.startsWith('{'));
     credentials = undefined;
 }
 

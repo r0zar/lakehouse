@@ -80,7 +80,7 @@ export async function GET(request: NextRequest) {
       last_updated: null
     };
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       prices,
       summary,
       query_params: {
@@ -89,6 +89,13 @@ export async function GET(request: NextRequest) {
         min_price: minPrice
       }
     });
+
+    // Add caching headers - prices update hourly, so cache for 5 minutes
+    response.headers.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
+    response.headers.set('CDN-Cache-Control', 'public, s-maxage=300');
+    response.headers.set('Vercel-CDN-Cache-Control', 'public, s-maxage=300');
+    
+    return response;
 
   } catch (error) {
     console.error('Error fetching token prices:', error);

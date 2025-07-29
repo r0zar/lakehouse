@@ -18,6 +18,7 @@ interface PoolData {
   token_b_id: string;
   reserves_a: number;
   reserves_b: number;
+  pool_type: string;
   token_a_decimals: number;
   token_b_decimals: number;
 }
@@ -29,17 +30,61 @@ interface PoolTVL {
   tvl_usd: number;
 }
 
-const BTC_USD_RATE = 100000; // TODO: Get from external API
+async function getBtcPriceFromKraken(): Promise<number> {
+  try {
+    console.log('Fetching BTC price from Kraken API...');
+    
+    const response = await fetch('https://api.kraken.com/0/public/Ticker?pair=XXBTZUSD');
+    const data = await response.json();
+    
+    if (data.error && data.error.length > 0) {
+      throw new Error(`Kraken API error: ${data.error.join(', ')}`);
+    }
+    
+    if (!data.result || !data.result.XXBTZUSD) {
+      throw new Error('Invalid response structure from Kraken API');
+    }
+    
+    const btcPrice = parseFloat(data.result.XXBTZUSD.c[0]); // 'c' is the last trade closed price
+    
+    if (isNaN(btcPrice) || btcPrice <= 0) {
+      throw new Error(`Invalid BTC price received: ${btcPrice}`);
+    }
+    
+    console.log(`✓ BTC price from Kraken: $${btcPrice.toLocaleString()}`);
+    return btcPrice;
+    
+  } catch (error) {
+    console.error('Error fetching BTC price from Kraken:', error);
+    
+    // Fallback to a reasonable default if API fails
+    const fallbackPrice = 100000;
+    console.log(`⚠️ Using fallback BTC price: $${fallbackPrice.toLocaleString()}`);
+    return fallbackPrice;
+  }
+}
 
 function escapeString(str: string): string {
   return str.replace(/'/g, "\\'");
 }
 
 async function getSeedPrices(): Promise<TokenPrice[]> {
-  console.log('Getting seed prices from database (latest prices)...');
+  console.log('Getting seed prices...');
   
+  // Get BTC price from Kraken API
+  const btcUsdPrice = await getBtcPriceFromKraken();
+  
+  // Create seed prices with BTC = sBTC assumption
+  const seedPrices: TokenPrice[] = [
+    {
+      token_contract_id: 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token',
+      sbtc_price: 1.0, // 1 sBTC = 1 BTC
+      usd_price: btcUsdPrice
+    }
+  ];
+  
+  // Try to get existing prices from database for other tokens (excluding sBTC to avoid circular dependency)
   try {
-    // First try to get prices from our database
     const query = `
       SELECT 
         token_contract_id,
@@ -47,6 +92,8 @@ async function getSeedPrices(): Promise<TokenPrice[]> {
         usd_price
       FROM \`crypto_data.current_token_prices\`
       WHERE usd_price > 0 AND sbtc_price > 0
+        AND token_contract_id != 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token'
+        AND usd_price < 1000000  -- Filter out obviously wrong prices
     `;
     
     writeFileSync('/tmp/get_seed_prices.sql', query);
@@ -57,31 +104,30 @@ async function getSeedPrices(): Promise<TokenPrice[]> {
     const rows = JSON.parse(result);
     
     if (rows.length > 0) {
-      const seedPrices: TokenPrice[] = rows.map((row: any) => ({
+      const dbPrices: TokenPrice[] = rows.map((row: any) => ({
         token_contract_id: row.token_contract_id,
         sbtc_price: parseFloat(row.sbtc_price),
         usd_price: parseFloat(row.usd_price)
       }));
       
-      console.log(`✓ Got ${seedPrices.length} seed prices from database`);
-      
-      // Log a few sample prices for verification
-      if (seedPrices.length > 0) {
-        console.log('Sample seed prices:');
-        seedPrices.slice(0, 3).forEach(p => {
-          console.log(`  ${p.token_contract_id}: $${p.usd_price.toFixed(6)} (${p.sbtc_price.toFixed(8)} sBTC)`);
-        });
-      }
-      
-      return seedPrices;
+      // Add database prices to seed prices
+      seedPrices.push(...dbPrices);
+      console.log(`✓ Added ${dbPrices.length} existing prices from database`);
     }
     
   } catch (error) {
-    console.log('No database prices available, falling back to API...');
+    console.log('No additional database prices available, continuing with sBTC only...');
   }
   
-  // If no database prices, throw error - no more API dependency
-  throw new Error('No seed prices available in database. Please bootstrap by importing initial data first.');
+  console.log(`✓ Using ${seedPrices.length} seed prices total`);
+  
+  // Log sample prices for verification
+  console.log('Seed prices:');
+  seedPrices.slice(0, 5).forEach(p => {
+    console.log(`  ${p.token_contract_id}: $${p.usd_price.toFixed(6)} (${p.sbtc_price.toFixed(8)} sBTC)`);
+  });
+  
+  return seedPrices;
 }
 
 // Global pool data loaded once at startup
@@ -92,23 +138,19 @@ async function loadPoolData(): Promise<void> {
   
   const query = `
     SELECT 
-      vr.vault_contract_id,
-      JSON_EXTRACT_SCALAR(vault.metadata, '$.token_a_contract_id') as token_a_id,
-      JSON_EXTRACT_SCALAR(vault.metadata, '$.token_b_contract_id') as token_b_id,
-      vr.reserves_a,
-      vr.reserves_b,
+      cpr.pool_contract_id as vault_contract_id,
+      lp.token_a_contract_id as token_a_id,
+      lp.token_b_contract_id as token_b_id,
+      cpr.reserves_a,
+      cpr.reserves_b,
+      lp.pool_type,
       COALESCE(CAST(JSON_EXTRACT_SCALAR(token_a_meta.metadata, '$.decimals') AS INT64), 6) as token_a_decimals,
       COALESCE(CAST(JSON_EXTRACT_SCALAR(token_b_meta.metadata, '$.decimals') AS INT64), 6) as token_b_decimals
-    FROM crypto_data.vault_reserves vr
-    JOIN crypto_data.contract_interfaces vault ON vault.contract_id = vr.vault_contract_id
-    LEFT JOIN crypto_data.contract_interfaces token_a_meta ON token_a_meta.contract_id = JSON_EXTRACT_SCALAR(vault.metadata, '$.token_a_contract_id') AND token_a_meta.interface = 'sip-010-ft'
-    LEFT JOIN crypto_data.contract_interfaces token_b_meta ON token_b_meta.contract_id = JSON_EXTRACT_SCALAR(vault.metadata, '$.token_b_contract_id') AND token_b_meta.interface = 'sip-010-ft'
-    WHERE vault.interface = 'vault'
-      AND vr.reserves_updated_at = (
-        SELECT MAX(reserves_updated_at) 
-        FROM crypto_data.vault_reserves vr2 
-        WHERE vr2.vault_contract_id = vr.vault_contract_id
-      )
+    FROM crypto_data.current_pool_reserves cpr
+    JOIN crypto_data.liquidity_pools lp ON lp.contract_id = cpr.pool_contract_id
+    LEFT JOIN crypto_data.contract_interfaces token_a_meta ON token_a_meta.contract_id = lp.token_a_contract_id AND token_a_meta.interface = 'sip-010-ft'
+    LEFT JOIN crypto_data.contract_interfaces token_b_meta ON token_b_meta.contract_id = lp.token_b_contract_id AND token_b_meta.interface = 'sip-010-ft'
+    WHERE lp.pool_type = 'constant_product'  -- Only use constant product pools for price calculation
   `;
   
   writeFileSync('/tmp/load_pool_data.sql', query);
@@ -124,6 +166,7 @@ async function loadPoolData(): Promise<void> {
       token_b_id: row.token_b_id,
       reserves_a: parseFloat(row.reserves_a),
       reserves_b: parseFloat(row.reserves_b),
+      pool_type: row.pool_type,
       token_a_decimals: parseInt(row.token_a_decimals),
       token_b_decimals: parseInt(row.token_b_decimals)
     }));
@@ -164,23 +207,27 @@ function calculatePoolTVLs(prices: TokenPrice[]): PoolTVL[] {
     // Skip pools with no meaningful TVL
     if (tvlUsd <= 0) continue;
     
-    // Calculate individual pool prices (token ratios × reference token price)
-    if (adjustedReservesA > 0) {
-      const tokenARatioInB = adjustedReservesB / adjustedReservesA;
-      poolTVLs.push({
-        vault_contract_id: pool.vault_contract_id,
-        token_contract_id: pool.token_a_id,
-        individual_price: tokenARatioInB * tokenBPrice,
-        tvl_usd: tvlUsd
-      });
-    }
+    // Only calculate prices relative to sBTC (stable anchor)
+    const sbtcTokenId = 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token';
+    const sbtcPrice = priceMap.get(sbtcTokenId) || 0;
     
-    if (adjustedReservesB > 0) {
-      const tokenBRatioInA = adjustedReservesA / adjustedReservesB;
+    // Only create price data if one of the tokens is sBTC
+    if (pool.token_a_id === sbtcTokenId && adjustedReservesA > 0) {
+      // Token B price = (sBTC reserves / Token B reserves) * sBTC price
+      const tokenBPriceFromPool = (adjustedReservesA / adjustedReservesB) * sbtcPrice;
       poolTVLs.push({
         vault_contract_id: pool.vault_contract_id,
         token_contract_id: pool.token_b_id,
-        individual_price: tokenBRatioInA * tokenAPrice,
+        individual_price: tokenBPriceFromPool,
+        tvl_usd: tvlUsd
+      });
+    } else if (pool.token_b_id === sbtcTokenId && adjustedReservesB > 0) {
+      // Token A price = (sBTC reserves / Token A reserves) * sBTC price  
+      const tokenAPriceFromPool = (adjustedReservesB / adjustedReservesA) * sbtcPrice;
+      poolTVLs.push({
+        vault_contract_id: pool.vault_contract_id,
+        token_contract_id: pool.token_a_id,
+        individual_price: tokenAPriceFromPool,
         tvl_usd: tvlUsd
       });
     }
@@ -190,7 +237,7 @@ function calculatePoolTVLs(prices: TokenPrice[]): PoolTVL[] {
   return poolTVLs;
 }
 
-function calculateWeightedPrices(poolTVLs: PoolTVL[]): TokenPrice[] {
+function calculateWeightedPrices(poolTVLs: PoolTVL[], btcUsdRate: number): TokenPrice[] {
   console.log('Calculating TVL-weighted prices...');
   
   const tokenPriceMap = new Map<string, { totalWeightedPrice: number, totalTVL: number }>();
@@ -211,7 +258,7 @@ function calculateWeightedPrices(poolTVLs: PoolTVL[]): TokenPrice[] {
       const usd_price = data.totalWeightedPrice / data.totalTVL;
       weightedPrices.push({
         token_contract_id: tokenId,
-        sbtc_price: usd_price / BTC_USD_RATE,
+        sbtc_price: usd_price / btcUsdRate,
         usd_price: usd_price
       });
     }
@@ -319,8 +366,9 @@ async function calculateTokenPrices(): Promise<void> {
     // 1. Load all pool data once at startup
     await loadPoolData();
     
-    // 2. Get seed prices from API
+    // 2. Get seed prices from API and BTC rate
     let prices = await getSeedPrices();
+    const btcPrice = await getBtcPriceFromKraken();
     
     if (prices.length === 0) {
       console.log('No seed prices available from API');
@@ -343,7 +391,7 @@ async function calculateTokenPrices(): Promise<void> {
       }
       
       // Calculate new weighted prices (in memory)
-      const newPrices = calculateWeightedPrices(poolTVLs);
+      const newPrices = calculateWeightedPrices(poolTVLs, btcPrice);
       
       // Check convergence
       const converged = iteration > 0 && hasConverged(prices, newPrices, 0.001);

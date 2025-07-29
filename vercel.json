@@ -67,6 +67,14 @@
     {
       "path": "/api/cron/calculate-token-prices",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/backfill-contracts",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/update-vault-reserves",
+      "schedule": "55 * * * *"
     }
   ]
 }
