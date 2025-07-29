@@ -266,21 +266,34 @@ const NetworkChart3D: React.FC<NetworkChart3DProps> = ({ data, hideIsolatedNodes
       const earliest = new Date(node.earliestTransaction);
       const latest = new Date(node.latestTransaction);
       
-      // If same day, show date range differently
+      // Format dates in local timezone with consistent options
+      const dateOptions: Intl.DateTimeFormatOptions = { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric' 
+      };
+      const timeOptions: Intl.DateTimeFormatOptions = { 
+        hour: '2-digit', 
+        minute: '2-digit', 
+        second: '2-digit',
+        hour12: false 
+      };
+      
+      // If same day (in local timezone), show date range differently
       const sameDay = earliest.toDateString() === latest.toDateString();
       
       if (sameDay) {
         return `
           <div style="color: #8aa3b3; font-size: 10px; margin-bottom: 8px; font-family: 'Courier New', monospace; text-align: center;">
-            ${earliest.toLocaleDateString()}<br>
-            ${earliest.toLocaleTimeString()} → ${latest.toLocaleTimeString()}
+            ${earliest.toLocaleDateString(undefined, dateOptions)}<br>
+            ${earliest.toLocaleTimeString(undefined, timeOptions)} → ${latest.toLocaleTimeString(undefined, timeOptions)}
           </div>
         `;
       } else {
         return `
           <div style="color: #8aa3b3; font-size: 10px; margin-bottom: 8px; font-family: 'Courier New', monospace; text-align: center;">
-            ${earliest.toLocaleDateString()} → ${latest.toLocaleDateString()}<br>
-            <span style="font-size: 9px; opacity: 0.8;">${earliest.toLocaleTimeString()} to ${latest.toLocaleTimeString()}</span>
+            ${earliest.toLocaleDateString(undefined, dateOptions)} → ${latest.toLocaleDateString(undefined, dateOptions)}<br>
+            <span style="font-size: 9px; opacity: 0.8;">${earliest.toLocaleTimeString(undefined, timeOptions)} to ${latest.toLocaleTimeString(undefined, timeOptions)}</span>
           </div>
         `;
       }

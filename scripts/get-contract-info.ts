@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { loadEnvConfig } from '@next/env';
-import { getContractInfoWithParsedAbi } from '../lib/stacks-api.ts';
+import { getContractInfoWithParsedAbi } from '../lib/stacks-api';
 
 loadEnvConfig(process.cwd());
 
@@ -24,7 +24,7 @@ async function main() {
       console.log('Contract not found or error occurred');
     }
   } catch (error) {
-    console.error('Error:', error.message);
+    console.error('Error:', error instanceof Error ? error.message : String(error));
     process.exit(1);
   }
 }
