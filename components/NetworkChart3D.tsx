@@ -263,6 +263,16 @@ const NetworkChart3D: React.FC<NetworkChart3DProps> = ({ data, hideIsolatedNodes
     }
 
     const dateSection = (node.earliestTransaction && node.latestTransaction) ? (() => {
+      // Debug: Log the original strings and parsed dates
+      console.log('Date Debug:', {
+        earliestString: node.earliestTransaction,
+        latestString: node.latestTransaction,
+        earliestParsed: new Date(node.earliestTransaction).toISOString(),
+        latestParsed: new Date(node.latestTransaction).toISOString(),
+        earliestLocal: new Date(node.earliestTransaction).toString(),
+        latestLocal: new Date(node.latestTransaction).toString()
+      });
+      
       const earliest = new Date(node.earliestTransaction);
       const latest = new Date(node.latestTransaction);
       

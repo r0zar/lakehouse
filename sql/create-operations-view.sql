@@ -7,7 +7,8 @@ CLUSTER BY webhook_path
 AS
 SELECT 
   event_id,
-  received_at,
+  -- Use blockchain timestamp instead of webhook received_at
+  TIMESTAMP_SECONDS(CAST(JSON_EXTRACT_SCALAR(body_json, '$.apply[0].timestamp') AS INT64)) as received_at,
   webhook_path,
   
   -- Operation fields from the Rosetta-style operations array
