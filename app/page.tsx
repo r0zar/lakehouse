@@ -8,6 +8,7 @@ interface HomeProps {
     hideIsolated?: string;
     address?: string;
     showParticles?: string;
+    focusMode?: string;
   }>;
 }
 
@@ -31,6 +32,9 @@ export default async function Home({ searchParams }: HomeProps) {
     showParticles = limit < 10000;
   }
 
+  // Parse focus mode parameter (default to false)
+  const focusMode = params.focusMode === 'true';
+
   return (
     <NetworkChartClient
       initialLimit={limit}
@@ -39,6 +43,7 @@ export default async function Home({ searchParams }: HomeProps) {
       initialHideIsolated={hideIsolated}
       initialAddress={address}
       initialShowParticles={showParticles}
+      initialFocusMode={focusMode}
     />
   );
 }

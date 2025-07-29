@@ -1,6 +1,13 @@
 import { NextRequest } from 'next/server';
 import { bigquery } from '@/lib/bigquery';
 
+// Cache control headers for network data (moderate cache since network data changes frequently)
+const NETWORK_CACHE_HEADERS = {
+  'Cache-Control': 'public, max-age=180, s-maxage=300, stale-while-revalidate=1800',
+  'CDN-Cache-Control': 'public, max-age=300',
+  'Vercel-CDN-Cache-Control': 'public, max-age=300'
+};
+
 // Server-side cache for token metadata with 1 hour TTL
 let tokenMetadataCache: {
   data: any[] | null;
@@ -425,10 +432,10 @@ export async function GET(request: NextRequest) {
 
     const response = Response.json(networkData);
     
-    // Add caching headers - network data is expensive to compute, cache for 10 minutes
-    response.headers.set('Cache-Control', 'public, s-maxage=600, stale-while-revalidate=1200');
-    response.headers.set('CDN-Cache-Control', 'public, s-maxage=600');
-    response.headers.set('Vercel-CDN-Cache-Control', 'public, s-maxage=600');
+    // Add caching headers - network data is expensive to compute, cache appropriately
+    Object.entries(NETWORK_CACHE_HEADERS).forEach(([key, value]) => {
+      response.headers.set(key, value);
+    });
     
     return response;
 
@@ -436,7 +443,12 @@ export async function GET(request: NextRequest) {
     console.error('Error fetching network data:', error);
     return Response.json(
       { error: 'Failed to fetch network data' },
-      { status: 500 }
+      { 
+        status: 500,
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate'
+        }
+      }
     );
   }
 }

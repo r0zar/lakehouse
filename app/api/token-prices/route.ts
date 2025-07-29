@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { bigquery } from '@/lib/bigquery';
 
+// Cache control headers for token prices (longer cache since prices don't change as frequently)
+const PRICE_CACHE_HEADERS = {
+  'Cache-Control': 'public, max-age=600, s-maxage=1800, stale-while-revalidate=7200',
+  'CDN-Cache-Control': 'public, max-age=1800',
+  'Vercel-CDN-Cache-Control': 'public, max-age=1800'
+};
+
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
@@ -90,10 +97,10 @@ export async function GET(request: NextRequest) {
       }
     });
 
-    // Add caching headers - prices update hourly, so cache for 5 minutes
-    response.headers.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
-    response.headers.set('CDN-Cache-Control', 'public, s-maxage=300');
-    response.headers.set('Vercel-CDN-Cache-Control', 'public, s-maxage=300');
+    // Add caching headers - prices update hourly, so cache longer
+    Object.entries(PRICE_CACHE_HEADERS).forEach(([key, value]) => {
+      response.headers.set(key, value);
+    });
     
     return response;
 
@@ -101,7 +108,12 @@ export async function GET(request: NextRequest) {
     console.error('Error fetching token prices:', error);
     return NextResponse.json(
       { error: 'Failed to fetch token prices' },
-      { status: 500 }
+      { 
+        status: 500,
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate'
+        }
+      }
     );
   }
 }

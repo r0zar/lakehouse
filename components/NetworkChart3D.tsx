@@ -3,6 +3,18 @@
 import React, { useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { formatTokenAmount } from '@/lib/tokenFormatter';
+import { ThreeJSResourceManager } from './NetworkChart3D/utils/LRUCache';
+import { meshFactory } from './NetworkChart3D/utils/MeshFactory';
+import { useHoverDebounce } from './NetworkChart3D/hooks/useDebounce';
+import { useTooltipGenerator } from './NetworkChart3D/hooks/useTooltipGenerator';
+import { processNetworkData } from './NetworkChart3D/utils/DataProcessing';
+import type { NetworkNode, NetworkLink, NetworkData } from './NetworkChart3D/types';
+import { NodeContextMenu } from './NetworkChart3D/components/NodeContextMenu';
+import { PinnedTooltip } from './NetworkChart3D/components/PinnedTooltip';
+import { HoverTooltip } from './NetworkChart3D/components/HoverTooltip';
+import { HotkeyFeedback } from './NetworkChart3D/components/HotkeyFeedback';
+import { NodeDetailsModal } from './NetworkChart3D/components/NodeDetailsModal';
+import { useContextMenu } from './NetworkChart3D/hooks/useContextMenu';
 
 // Dynamically import ForceGraph3D with SSR disabled
 const ForceGraph3D = dynamic(() => import('react-force-graph-3d'), {
@@ -15,61 +27,54 @@ const ForceGraph3D = dynamic(() => import('react-force-graph-3d'), {
 });
 
 
-interface NetworkNode {
-  id: string;
-  name: string;
-  category: string;
-  value: number;
-  val?: number;
-  dominantToken?: string;
-  tokenFlows?: Record<string, any>;
-  latestTransaction?: string | null;
-  earliestTransaction?: string | null;
-}
-
-interface NetworkLink {
-  source: string;
-  target: string;
-  value: number;
-  raw_value?: number;
-  asset?: string;
-  currency_symbol?: string;
-  decimals?: number;
-  token_symbol?: string;
-  original_token_symbol?: string;
-  asset_class_identifier?: string;
-  token_image?: string;
-  received_at?: string;
-}
-
-export interface NetworkData {
-  nodes: NetworkNode[];
-  links: NetworkLink[];
-  dateRange?: {
-    oldest: string;
-    newest: string;
-    count: number;
-  } | null;
-}
 
 interface NetworkChart3DProps {
   data: NetworkData;
   hideIsolatedNodes?: boolean;
   showParticles?: boolean;
+  focusMode?: boolean;
   onVisualizationReady?: () => void;
+  onNetworkFilter?: (nodeAddress: string) => void;
 }
 
-const NetworkChart3D: React.FC<NetworkChart3DProps> = ({ data, hideIsolatedNodes = true, showParticles = false, onVisualizationReady }) => {
+const NetworkChart3D: React.FC<NetworkChart3DProps> = ({ data, hideIsolatedNodes = true, showParticles = false, focusMode = false, onVisualizationReady, onNetworkFilter }) => {
   const fgRef = useRef<any>(null);
   const [dimensions, setDimensions] = useState({ width: 1200, height: 800 });
   const [isClient, setIsClient] = useState(false);
   
-  // Cache THREE.js objects to avoid recreation on every render
-  const geometryCache = useRef<Map<string, any>>(new Map());
-  const materialCache = useRef<Map<string, any>>(new Map());
+  // Focus mode state management
+  const [hoveredNode, setHoveredNode] = useState<any>(null);
+  const [highlightedLinks, setHighlightedLinks] = useState<Set<any>>(new Set());
   
-  // Cache tooltip HTML strings to avoid expensive string operations on every hover
-  const tooltipCache = useRef<Map<string, string>>(new Map());
+  // Context menu and pinned tooltip state
+  const {
+    contextMenu,
+    showContextMenu,
+    hideContextMenu,
+    pinnedTooltips,
+    addPinnedTooltip,
+    removePinnedTooltip,
+    clearAllPinnedTooltips,
+    handleNodeAction
+  } = useContextMenu({ 
+    onNetworkFilter,
+    onViewDetails: (address: string) => {
+      setDetailsModal({ isOpen: true, address });
+    }
+  });
+  
+  // Hotkey feedback state
+  const [hotkeyAction, setHotkeyAction] = useState<string | null>(null);
+  
+  // Modal state
+  const [detailsModal, setDetailsModal] = useState<{ isOpen: boolean; address: string }>({
+    isOpen: false,
+    address: ''
+  });
+  
+  
+  // Tooltip generation with caching
+  const { generateTooltipHTML, clearCache: clearTooltipCache } = useTooltipGenerator(200);
 
   // Ensure we're on the client side
   useEffect(() => {
@@ -90,305 +95,210 @@ const NetworkChart3D: React.FC<NetworkChart3DProps> = ({ data, hideIsolatedNodes
     return () => window.removeEventListener('resize', updateDimensions);
   }, []);
 
-  // Process data for 3D visualization - now much simpler since SQL does the heavy lifting
+  // Process data for 3D visualization using utility functions
   const processedData = React.useMemo(() => {
-    console.log('Processing data - Raw input:', { nodeCount: data.nodes.length, linkCount: data.links.length });
-    // Filter nodes based on hideIsolatedNodes setting
-    let nodes = data.nodes;
-    
-    if (hideIsolatedNodes) {
-      // Create a set of node IDs that have links
-      const connectedNodeIds = new Set<string>();
-      data.links.forEach(link => {
-        connectedNodeIds.add(link.source);
-        connectedNodeIds.add(link.target);
-      });
-      
-      // Debug: Check for nodes with flows but no links
-      let nodesWithFlowsButNoLinks = 0;
-      let totalNodesWithFlows = 0;
-      
-      data.nodes.forEach(node => {
-        const tokenFlows = Object.entries(node.tokenFlows || {});
-        if (tokenFlows.length > 0) {
-          totalNodesWithFlows++;
-          if (!connectedNodeIds.has(node.name)) {
-            nodesWithFlowsButNoLinks++;
-            console.log(`Node ${node.name} has ${tokenFlows.length} token flows but no links:`, tokenFlows);
-          }
-        }
-      });
-      
-      console.log(`Debug: ${nodesWithFlowsButNoLinks}/${totalNodesWithFlows} nodes have flows but no links`);
-      console.log(`Links data:`, data.links.length, 'total links');
-      
-      // Filter to only include nodes that have connections
-      nodes = nodes.filter(node => connectedNodeIds.has(node.name));
-    }
-
-    // Validate that all links reference existing nodes
-    const nodeIds = new Set(nodes.map(node => node.name));
-    const validLinks = data.links.filter(link => {
-      const sourceExists = nodeIds.has(link.source);
-      const targetExists = nodeIds.has(link.target);
-      if (!sourceExists || !targetExists) {
-        console.warn(`Filtered out link due to missing nodes - Source: ${link.source} (${sourceExists}), Target: ${link.target} (${targetExists})`);
-      }
-      return sourceExists && targetExists;
-    });
-
-    console.log(`Link validation: ${data.links.length} original -> ${validLinks.length} valid links`);
-
-    // Process links with curvature and particles - controlled by showParticles prop
-    const links = validLinks.map((link, index) => ({
-      ...link,
-      curvature: 0.05 + (Math.random() * 0.1), // Even gentler curvature for better performance
-      rotation: (index * 0.2) % (Math.PI * 2), // Reduced rotation spread
-      particles: showParticles ? (link.value > 1e15 ? 2 : 1) : 0, // Show particles based on toggle and value
-    }));
-
-    console.log('Final processed data:', { nodeCount: nodes.length, linkCount: links.length });
-    return { nodes, links };
+    return processNetworkData(data, hideIsolatedNodes, showParticles);
   }, [data, hideIsolatedNodes, showParticles]);
 
   // Pre-warm WebGL context and create common objects
   useEffect(() => {
     if (isClient && typeof window !== 'undefined') {
       // Pre-create some common mesh objects to warm up the GPU
-      const categories = ['Wallet', 'Contract', 'System'];
-      categories.forEach(category => {
-        getCachedNodeObject(category, 4); // Pre-cache common node types
-      });
+      meshFactory.preWarmCache(['Wallet', 'Contract', 'System'], 4);
     }
   }, [isClient]);
 
-  // Signal when visualization is ready (after data processing and a short delay for rendering)
+  // Signal when visualization is ready (after data processing and proper rendering)
   useEffect(() => {
     if (processedData.nodes.length > 0 && onVisualizationReady) {
-      // Add a small delay to ensure the 3D graph has had time to initialize
+      // Wait for multiple animation frames to ensure THREE.js has rendered
       const timer = setTimeout(() => {
-        onVisualizationReady();
-      }, 800); // Increased to 800ms to account for GPU warmup
+        // Additional check to ensure ForceGraph3D is properly initialized
+        if (fgRef.current && fgRef.current.scene) {
+          // Wait for one more frame to ensure the scene is fully rendered with new data
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              onVisualizationReady();
+            });
+          });
+        } else {
+          // Retry if scene isn't ready yet
+          setTimeout(() => {
+            onVisualizationReady();
+          }, 300);
+        }
+      }, 1200); // Longer delay for more reliable rendering, especially for filters
       
       return () => clearTimeout(timer);
     }
   }, [processedData, onVisualizationReady]);
 
-  // Color mapping for categories
-  const getCategoryColor = (category: string) => {
-    const colors = {
-      'Wallet': '#3B82F6',    // Blue
-      'Contract': '#EF4444',  // Red  
-      'System': '#10B981',    // Green (legacy name for multisig wallets)
-      'Multisig': '#10B981',  // Green (proper name for multisig wallets)
-      'DeFi': '#8B5CF6',      // Purple
-      'Stacking': '#F59E0B'   // Amber
-    };
-    return colors[category as keyof typeof colors] || '#6B7280';
-  };
-
-  // Cached THREE.js object creation with full mesh caching
-  const getCachedNodeObject = (category: string, size: number = 4) => {
-    if (typeof window === 'undefined') return null;
-    
-    const THREE = require('three');
-    const cacheKey = `${category}_${size}`;
-    
-    // Cache the complete mesh, not just geometry/material
-    if (!geometryCache.current.has(cacheKey)) {
-      const geometry = new THREE.SphereGeometry(size * 0.5, 12, 8); // Reduced segments for better performance
-      const material = new THREE.MeshLambertMaterial({
-        color: getCategoryColor(category)
-      });
-      const mesh = new THREE.Mesh(geometry, material);
-      geometryCache.current.set(cacheKey, mesh);
-    }
-    
-    // Clone the cached mesh instead of creating new one
-    const cachedMesh = geometryCache.current.get(cacheKey);
-    return cachedMesh.clone();
-  };
-
-  // Generate and cache tooltip HTML
-  const getCachedTooltipHTML = (node: any) => {
-    // tokenFlows is now always a plain object (not Map) for JSON serialization
-    const tokenFlowsArray = Object.entries(node.tokenFlows || {});
-    
-    
-    const cacheKey = `${node.name}_${node.earliestTransaction || 'no-earliest'}_${node.latestTransaction || 'no-latest'}_${tokenFlowsArray.map((entry: any) => `${entry[0]}:${entry[1].inbound}:${entry[1].outbound}`).join('|')}`;
-    
-    if (tooltipCache.current.has(cacheKey)) {
-      return tooltipCache.current.get(cacheKey)!;
-    }
-
-    // Create aligned grid for token flows - sort by total activity
-    const sortedTokens = tokenFlowsArray
-      .sort((a: any, b: any) => b[1].total - a[1].total)
-      .filter(([_, flow]: any) => flow.inbound > 0 || flow.outbound > 0);
-
-    let tokenFlowsGrid = '';
-    if (sortedTokens.length > 0) {
-      // Create two-column grid with headers
-      tokenFlowsGrid = `
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 6px;">
-          <!-- Credits Column -->
-          <div>
-            <div style="color: #00ff88; font-size: 9px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; text-align: center; border-bottom: 1px solid rgba(0,255,136,0.3); padding-bottom: 2px;">
-              ◦ CREDITS ◦
-            </div>
-            ${sortedTokens.map(([token, flow]: any) => {
-              if (flow.inbound > 0) {
-                return `<div style="color: #00ff88; font-family: 'Courier New', monospace; font-size: 10px; margin-bottom: 3px; text-align: right; padding-right: 4px;">+ ${formatTokenAmount(flow.inbound, token)}</div>`;
-              } else {
-                return `<div style="height: 16px;"></div>`; // Spacer for alignment
-              }
-            }).join('')}
-          </div>
-          
-          <!-- Debits Column -->
-          <div>
-            <div style="color: #ff4444; font-size: 9px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; text-align: center; border-bottom: 1px solid rgba(255,68,68,0.3); padding-bottom: 2px;">
-              ◦ DEBITS ◦
-            </div>
-            ${sortedTokens.map(([token, flow]: any) => {
-              if (flow.outbound > 0) {
-                return `<div style="color: #ff4444; font-family: 'Courier New', monospace; font-size: 10px; margin-bottom: 3px; text-align: left; padding-left: 4px;">- ${formatTokenAmount(flow.outbound, token)}</div>`;
-              } else {
-                return `<div style="height: 16px;"></div>`; // Spacer for alignment
-              }
-            }).join('')}
-          </div>
-        </div>
-      `;
-    }
-
-    const dateSection = (node.earliestTransaction && node.latestTransaction) ? (() => {
-      // Debug: Log the original strings and parsed dates
-      console.log('Date Debug:', {
-        earliestString: node.earliestTransaction,
-        latestString: node.latestTransaction,
-        earliestParsed: new Date(node.earliestTransaction).toISOString(),
-        latestParsed: new Date(node.latestTransaction).toISOString(),
-        earliestLocal: new Date(node.earliestTransaction).toString(),
-        latestLocal: new Date(node.latestTransaction).toString()
-      });
+  // Cleanup THREE.js resources on component unmount
+  useEffect(() => {
+    return () => {
       
-      const earliest = new Date(node.earliestTransaction);
-      const latest = new Date(node.latestTransaction);
+      // Clear all caches with proper disposal
+      meshFactory.dispose();
+      clearTooltipCache();
       
-      // Format dates in local timezone with consistent options
-      const dateOptions: Intl.DateTimeFormatOptions = { 
-        year: 'numeric', 
-        month: 'short', 
-        day: 'numeric' 
-      };
-      const timeOptions: Intl.DateTimeFormatOptions = { 
-        hour: '2-digit', 
-        minute: '2-digit', 
-        second: '2-digit',
-        hour12: false 
-      };
-      
-      // If same day (in local timezone), show date range differently
-      const sameDay = earliest.toDateString() === latest.toDateString();
-      
-      if (sameDay) {
-        return `
-          <div style="color: #8aa3b3; font-size: 10px; margin-bottom: 8px; font-family: 'Courier New', monospace; text-align: center;">
-            ${earliest.toLocaleDateString(undefined, dateOptions)}<br>
-            ${earliest.toLocaleTimeString(undefined, timeOptions)} → ${latest.toLocaleTimeString(undefined, timeOptions)}
-          </div>
-        `;
-      } else {
-        return `
-          <div style="color: #8aa3b3; font-size: 10px; margin-bottom: 8px; font-family: 'Courier New', monospace; text-align: center;">
-            ${earliest.toLocaleDateString(undefined, dateOptions)} → ${latest.toLocaleDateString(undefined, dateOptions)}<br>
-            <span style="font-size: 9px; opacity: 0.8;">${earliest.toLocaleTimeString(undefined, timeOptions)} to ${latest.toLocaleTimeString(undefined, timeOptions)}</span>
-          </div>
-        `;
+      // Clean up ForceGraph3D scene and all its resources
+      if (fgRef.current && fgRef.current.scene) {
+        const scene = fgRef.current.scene();
+        ThreeJSResourceManager.disposeScene(scene);
       }
-    })() : '';
-
-    const html = `
-      <div style="
-        background: linear-gradient(135deg, rgba(0,15,35,0.95) 0%, rgba(0,25,50,0.95) 100%);
-        border: 2px solid #00ff88;
-        border-radius: 0px;
-        padding: 12px;
-        font-family: 'Courier New', monospace;
-        font-size: 11px;
-        max-width: 700px;
-        word-break: break-word;
-        overflow-wrap: anywhere;
-        box-shadow: 0 0 20px rgba(0,255,136,0.3), inset 0 1px 0 rgba(255,255,255,0.1);
-        position: relative;
-      ">
-        <div style="
-          color: #00ff88; 
-          font-weight: bold; 
-          font-size: 9px; 
-          text-transform: uppercase; 
-          letter-spacing: 2px;
-          margin-bottom: 8px;
-          border-bottom: 1px solid rgba(0,255,136,0.3);
-          padding-bottom: 4px;
-        ">
-          ${getCategoryDisplayName(node.category)} NODE
-        </div>
-        <div style="color: #ffffff; font-weight: bold; margin-bottom: 8px; font-size: 12px;">
-          ${node.name}
-        </div>
-        ${dateSection}
-        <div style="margin-top: 8px;">
-          <div style="color: #00ff88; font-size: 9px; text-transform: uppercase; margin-bottom: 4px; letter-spacing: 1px; text-align: center;">
-            ◦ TRANSACTION FLOWS ◦
-          </div>
-          ${tokenFlowsGrid || `<div style="color: #00ff88; font-family: 'Courier New', monospace; text-align: center;">◦ ${formatTokenAmount(node.value, node.dominantToken)}</div>`}
-        </div>
-        <div style="
-          position: absolute;
-          top: 4px;
-          right: 8px;
-          width: 6px;
-          height: 6px;
-          background: #00ff88;
-          border-radius: 50%;
-          box-shadow: 0 0 8px #00ff88;
-          animation: pulse 2s infinite;
-        "></div>
-      </div>
-      <style>
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.3; }
+      
+      // Clean up renderer if accessible
+      if (fgRef.current && fgRef.current.renderer) {
+        const renderer = fgRef.current.renderer();
+        if (renderer && renderer.dispose) {
+          renderer.dispose();
         }
-      </style>
-    `;
-
-    tooltipCache.current.set(cacheKey, html);
-    return html;
-  };
-
-  // Display proper category names (convert legacy names to current ones)
-  const getCategoryDisplayName = (category: string) => {
-    const displayNames = {
-      'System': 'Multisig',  // Convert legacy "System" to "Multisig"
-      'Wallet': 'Wallet',
-      'Contract': 'Contract',
-      'Multisig': 'Multisig',
-      'DeFi': 'DeFi',
-      'Stacking': 'Stacking'
+      }
+      
+      // Force garbage collection hint (development mode)
+      ThreeJSResourceManager.triggerGC();
+      
+      console.log('NetworkChart3D: Cleaned up all THREE.js resources');
     };
-    return displayNames[category as keyof typeof displayNames] || category;
-  };
+  }, []);
 
-  // Link color based on value
-  const getLinkColor = (link: any) => {
+
+  // Handle node actions from context menu
+  React.useEffect(() => {
+    const handleNodeActionEvent = (event: CustomEvent) => {
+      const { action, node } = event.detail;
+      
+      switch (action) {
+        case 'focus-camera':
+          handleNodeClick(node);
+          break;
+        case 'view-details':
+          // Could open a detailed modal
+          console.log('View details for node:', node.name);
+          break;
+      }
+    };
+    
+    document.addEventListener('nodeAction', handleNodeActionEvent as EventListener);
+    
+    return () => {
+      document.removeEventListener('nodeAction', handleNodeActionEvent as EventListener);
+    };
+  }, []);
+  
+  // Global hotkeys when hovering over nodes
+  React.useEffect(() => {
+    const handleGlobalHotkeys = (event: KeyboardEvent) => {
+      // Only trigger if we're hovering over a node and context menu is not open
+      if (!hoveredNode || contextMenu.isVisible) return;
+      
+      // Prevent hotkeys when typing in inputs
+      const activeElement = document.activeElement;
+      if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
+        return;
+      }
+      
+      const key = event.key.toLowerCase();
+      
+      const actions: Record<string, string> = {
+        'q': 'pin-tooltip',
+        'w': 'focus-camera',
+        'c': 'copy-address',
+        'e': 'export-data',
+        'f': 'filter-network',
+        'a': 'view-details'
+      };
+      
+      const action = actions[key];
+      if (action) {
+        event.preventDefault();
+        handleNodeAction(action, hoveredNode);
+        setHotkeyAction(action); // Show feedback
+      }
+    };
+    
+    document.addEventListener('keydown', handleGlobalHotkeys);
+    
+    return () => {
+      document.removeEventListener('keydown', handleGlobalHotkeys);
+    };
+  }, [hoveredNode, contextMenu.isVisible, handleNodeAction]);
+
+  // Listen for pin limit alerts
+  React.useEffect(() => {
+    const handlePinLimitAlert = (event: CustomEvent) => {
+      const { action } = event.detail;
+      setHotkeyAction(action);
+    };
+    
+    document.addEventListener('hotkeyFeedback', handlePinLimitAlert as EventListener);
+    
+    return () => {
+      document.removeEventListener('hotkeyFeedback', handlePinLimitAlert as EventListener);
+    };
+  }, []);
+
+
+
+  // Link color and visibility based on focus mode - memoized for performance
+  const getLinkColor = React.useCallback((link: any) => {
+    if (focusMode && !highlightedLinks.has(link)) {
+      // In focus mode, hide non-highlighted links by making them transparent
+      return 'rgba(100, 100, 100, 0)';
+    }
+    
     const intensity = Math.min(link.value / 1e12, 1); // Normalize to 0-1
     return `rgba(100, 100, 100, ${0.3 + intensity * 0.7})`;
-  };
+  }, [focusMode, highlightedLinks]);
 
-  // Handle node click
+  // Link width based on focus mode - memoized for performance
+  const getLinkWidth = React.useCallback((link: any) => {
+    if (focusMode && !highlightedLinks.has(link)) {
+      // In focus mode, hide non-highlighted links by setting width to 0
+      return 0;
+    }
+    return 1;
+  }, [focusMode, highlightedLinks]);
+
+  // Link particles based on focus mode - memoized for performance
+  const getLinkParticles = React.useCallback((link: any) => {
+    if (focusMode && !highlightedLinks.has(link)) {
+      // In focus mode, hide particles for non-highlighted links
+      return 0;
+    }
+    return link.particles || 0;
+  }, [focusMode, highlightedLinks]);
+
+  // Handle node hover for focus mode and tooltip display - memoized for performance
+  const handleNodeHoverInternal = React.useCallback((node: any) => {
+    // Always update hovered node for tooltip display
+    setHoveredNode(node);
+    
+    // Focus mode link highlighting
+    if (focusMode) {
+      const newHighlightedLinks = new Set();
+      
+      if (node && node.links) {
+        // Add all links connected to the hovered node
+        node.links.forEach((link: any) => {
+          newHighlightedLinks.add(link);
+        });
+      }
+      
+      setHighlightedLinks(newHighlightedLinks);
+    }
+    
+    // Update cursor style
+    document.body.style.cursor = node ? 'pointer' : 'default';
+  }, [focusMode]);
+  
+  // Debounced hover with immediate unhover for better responsiveness
+  const { debouncedHover: handleNodeHover } = useHoverDebounce(
+    handleNodeHoverInternal,
+    30 // 30ms debounce - fast enough to feel instant, slow enough to reduce updates
+  );
+
+  // Handle node click (left-click for camera focus)
   const handleNodeClick = (node: any) => {
     if (fgRef.current) {
       // Focus camera on clicked node
@@ -404,6 +314,36 @@ const NetworkChart3D: React.FC<NetworkChart3DProps> = ({ data, hideIsolatedNodes
       }
     }
   };
+  
+  // Handle node right-click (context menu) - specifically blocks right-drag on nodes
+  const handleNodeRightClick = (node: any, event: any) => {
+    event.preventDefault(); // Prevent default browser context menu
+    event.stopPropagation(); // Stop event from bubbling up
+    
+    // Block any potential drag behavior on this specific node
+    const handleMouseMove = (e: MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    
+    const handleMouseUp = () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+    
+    // Temporarily block mouse move events to prevent drag
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    
+    // Get mouse position from the event
+    const rect = event.target?.getBoundingClientRect() || { left: 0, top: 0 };
+    const position = {
+      x: event.clientX || rect.left + 100,
+      y: event.clientY || rect.top + 100
+    };
+    
+    showContextMenu(node, position);
+  };
 
   // Show loading until client-side hydration is complete
   if (!isClient) {
@@ -417,12 +357,6 @@ const NetworkChart3D: React.FC<NetworkChart3DProps> = ({ data, hideIsolatedNodes
   return (
     <div className="fixed inset-0 bg-black">
 
-      {/* Performance stats */}
-      <div className="absolute top-4 right-4 z-10 bg-black bg-opacity-70 rounded-lg p-3">
-        <div className="text-white text-xs">
-          <div>FPS: <span id="fps-counter">--</span></div>
-        </div>
-      </div>
 
       {/* 3D Force Graph */}
       <ForceGraph3D
@@ -436,18 +370,18 @@ const NetworkChart3D: React.FC<NetworkChart3DProps> = ({ data, hideIsolatedNodes
         warmupTicks={30}
 
         // Node appearance
-        nodeColor={(node: any) => getCategoryColor(node.category)}
+        nodeColor={(node: any) => meshFactory.getCategoryColor(node.category)}
         nodeVal={(node: any) => node.val}
-        nodeLabel={(node: any) => getCachedTooltipHTML(node)}
-        nodeThreeObject={(node: any) => getCachedNodeObject(node.category, node.val)}
+        nodeLabel={() => ''} // Disable default tooltips
+        nodeThreeObject={(node: any) => meshFactory.createNodeMesh(node.category, node.val)}
 
         // Link appearance with curves and particles
         linkColor={getLinkColor}
-        linkWidth={1}
+        linkWidth={getLinkWidth}
         linkCurvature="curvature"
         linkCurveRotation="rotation"
         linkDirectionalArrowLength={0}
-        linkDirectionalParticles="particles"
+        linkDirectionalParticles={getLinkParticles}
         linkDirectionalParticleSpeed={0.008} // Slightly slower for less GPU work
         linkDirectionalParticleWidth={1.2} // Smaller particles
         linkDirectionalParticleColor="#00ff88"
@@ -455,9 +389,8 @@ const NetworkChart3D: React.FC<NetworkChart3DProps> = ({ data, hideIsolatedNodes
 
         // Interactions
         onNodeClick={handleNodeClick}
-        onNodeHover={(node: any) => {
-          document.body.style.cursor = node ? 'pointer' : 'default';
-        }}
+        onNodeRightClick={handleNodeRightClick}
+        onNodeHover={handleNodeHover}
 
         // Physics - optimized for faster initial settling
         d3AlphaDecay={0.05} // Increased from 0.02 for faster simulation settling
@@ -470,6 +403,82 @@ const NetworkChart3D: React.FC<NetworkChart3DProps> = ({ data, hideIsolatedNodes
         // Camera
         showNavInfo={false}
         controlType="orbit"
+      />
+      
+      {/* Context Menu */}
+      <NodeContextMenu
+        node={contextMenu.node}
+        position={contextMenu.position}
+        isVisible={contextMenu.isVisible}
+        onClose={hideContextMenu}
+        onActionSelect={handleNodeAction}
+      />
+      
+      {/* Pinned Tooltips Container */}
+      {pinnedTooltips.length > 0 && (
+        <div 
+          className="fixed top-4 right-4 z-40 flex flex-col gap-4 max-h-[calc(100vh-2rem)] overflow-y-auto"
+          style={{
+            scrollbarWidth: 'thin',
+            scrollbarColor: '#00ff88 rgba(0, 0, 0, 0.3)'
+          }}
+        >
+          <style jsx>{`
+            div::-webkit-scrollbar {
+              width: 8px;
+            }
+            
+            div::-webkit-scrollbar-track {
+              background: linear-gradient(180deg, rgba(0, 0, 0, 0.8) 0%, rgba(55, 65, 81, 0.3) 50%, rgba(0, 0, 0, 0.8) 100%);
+              border-radius: 0px;
+              border: 1px solid rgba(0, 255, 136, 0.2);
+            }
+            
+            div::-webkit-scrollbar-thumb {
+              background: linear-gradient(180deg, #00ff88 0%, rgba(0, 255, 136, 0.7) 50%, #00ff88 100%);
+              border-radius: 0px;
+              border: 1px solid rgba(0, 255, 136, 0.5);
+              box-shadow: 
+                0 0 8px rgba(0, 255, 136, 0.4),
+                inset 0 1px 0 rgba(255, 255, 255, 0.2),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.5);
+            }
+            
+            div::-webkit-scrollbar-thumb:hover {
+              background: linear-gradient(180deg, #00ff88 0%, rgba(0, 255, 136, 0.9) 50%, #00ff88 100%);
+              box-shadow: 
+                0 0 12px rgba(0, 255, 136, 0.6),
+                inset 0 1px 0 rgba(255, 255, 255, 0.3),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.6);
+            }
+          `}</style>
+          {pinnedTooltips.map((node) => (
+            <PinnedTooltip
+              key={node.name}
+              node={node}
+              onClose={() => removePinnedTooltip(node.name)}
+              useFlexbox={true}
+            />
+          ))}
+        </div>
+      )}
+      
+      {/* Hover Tooltip */}
+      <HoverTooltip
+        node={hoveredNode}
+      />
+      
+      {/* Hotkey Feedback */}
+      <HotkeyFeedback
+        action={hotkeyAction}
+        onComplete={() => setHotkeyAction(null)}
+      />
+      
+      {/* Node Details Modal */}
+      <NodeDetailsModal
+        isOpen={detailsModal.isOpen}
+        address={detailsModal.address}
+        onClose={() => setDetailsModal({ isOpen: false, address: '' })}
       />
     </div>
   );

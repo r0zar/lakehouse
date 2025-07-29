@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useTransition, useEffect } from 'react';
-import NetworkChart3D, { NetworkData } from './NetworkChart3D';
+import NetworkChart3D from './NetworkChart3D';
+import { NetworkData } from './NetworkChart3D/types';
 import { Drawer } from 'vaul';
 
 interface NetworkChartClientProps {
@@ -11,6 +12,7 @@ interface NetworkChartClientProps {
   initialHideIsolated?: boolean;
   initialAddress?: string;
   initialShowParticles?: boolean;
+  initialFocusMode?: boolean;
 }
 
 export default function NetworkChartClient({
@@ -19,7 +21,8 @@ export default function NetworkChartClient({
   initialAsset = '',
   initialHideIsolated = true,
   initialAddress = '',
-  initialShowParticles
+  initialShowParticles,
+  initialFocusMode = false
 }: NetworkChartClientProps) {
   // Always start with initialLimit to avoid hydration mismatch
   const [limit, setLimitState] = useState(initialLimit);
@@ -33,6 +36,7 @@ export default function NetworkChartClient({
       ? initialShowParticles 
       : initialLimit < 10000
   );
+  const [focusMode, setFocusMode] = useState(initialFocusMode);
   const [isPending, startTransition] = useTransition();
   const [networkData, setNetworkData] = useState<NetworkData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +46,7 @@ export default function NetworkChartClient({
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   // Function to update URL search parameters
-  const updateUrlParams = (params: { limit: number; minValue: number; asset: string; hideIsolatedNodes: boolean; address: string; showParticles?: boolean }) => {
+  const updateUrlParams = (params: { limit: number; minValue: number; asset: string; hideIsolatedNodes: boolean; address: string; showParticles?: boolean; focusMode?: boolean }) => {
     if (typeof window === 'undefined') return;
 
     const url = new URL(window.location.href);
@@ -78,6 +82,13 @@ export default function NetworkChartClient({
       } else {
         searchParams.delete('showParticles'); // Use auto-default, so omit
       }
+    }
+
+    // Handle focusMode parameter - only set if true (default is false)
+    if (params.focusMode === true) {
+      searchParams.set('focusMode', 'true');
+    } else {
+      searchParams.delete('focusMode'); // Default is false, so omit when false
     }
 
     // Update URL without page reload
@@ -142,7 +153,8 @@ export default function NetworkChartClient({
       asset: asset || '',
       hideIsolatedNodes,
       address: address || '',
-      showParticles: showParticles
+      showParticles: showParticles,
+      focusMode
     });
   };
 
@@ -155,7 +167,8 @@ export default function NetworkChartClient({
       asset: asset || '',
       hideIsolatedNodes,
       address: address || '',
-      showParticles
+      showParticles,
+      focusMode
     });
   };
 
@@ -168,7 +181,8 @@ export default function NetworkChartClient({
       asset: newAsset || '',
       hideIsolatedNodes,
       address: address || '',
-      showParticles
+      showParticles,
+      focusMode
     });
   };
 
@@ -181,7 +195,8 @@ export default function NetworkChartClient({
       asset: asset || '',
       hideIsolatedNodes: newHideIsolated,
       address: address || '',
-      showParticles
+      showParticles,
+      focusMode
     });
   };
 
@@ -194,7 +209,8 @@ export default function NetworkChartClient({
       asset: asset || '',
       hideIsolatedNodes,
       address: newAddress || '',
-      showParticles
+      showParticles,
+      focusMode
     });
   };
 
@@ -207,7 +223,22 @@ export default function NetworkChartClient({
       asset: asset || '',
       hideIsolatedNodes,
       address: address || '',
-      showParticles: newShowParticles
+      showParticles: newShowParticles,
+      focusMode
+    });
+  };
+
+  // Custom setFocusMode function that updates URL
+  const setFocusModeAndUrl = (newFocusMode: boolean) => {
+    setFocusMode(newFocusMode);
+    updateUrlParams({
+      limit,
+      minValue,
+      asset: asset || '',
+      hideIsolatedNodes,
+      address: address || '',
+      showParticles,
+      focusMode: newFocusMode
     });
   };
 
@@ -218,7 +249,39 @@ export default function NetworkChartClient({
       asset: asset || '',
       hideIsolatedNodes,
       address: address || '',
-      showParticles
+      showParticles,
+      focusMode
+    };
+
+    // Update URL to make it shareable
+    updateUrlParams(newParams);
+
+    startTransition(() => {
+      setCurrentParams(newParams);
+      fetchNetworkData(newParams);
+    });
+  };
+
+  // Handle network filter requests from the 3D component
+  const handleNetworkFilter = (nodeAddress: string) => {
+    // Update the address filter and trigger new data fetch
+    setAddress(nodeAddress);
+    
+    // Reset visualization ready state immediately to show loading screen
+    setIsVisualizationReady(false);
+    setIsLoadingFadingOut(false);
+    
+    // Clear current network data to avoid showing stale data
+    setNetworkData(null);
+    
+    const newParams = {
+      limit,
+      minValue,
+      asset: asset || '',
+      hideIsolatedNodes,
+      address: nodeAddress,
+      showParticles,
+      focusMode
     };
 
     // Update URL to make it shareable
@@ -239,6 +302,52 @@ export default function NetworkChartClient({
 
   return (
     <div className="relative">
+      <style jsx>{`
+        .sci-fi-scrollbar {
+          scrollbar-width: thin;
+          scrollbar-color: #00ff88 rgba(0, 0, 0, 0.3);
+        }
+        
+        .sci-fi-scrollbar::-webkit-scrollbar {
+          width: 8px;
+        }
+        
+        .sci-fi-scrollbar::-webkit-scrollbar-track {
+          background: linear-gradient(180deg, rgba(0, 0, 0, 0.8) 0%, rgba(55, 65, 81, 0.3) 50%, rgba(0, 0, 0, 0.8) 100%);
+          border-radius: 0px;
+          border: 1px solid rgba(0, 255, 136, 0.2);
+        }
+        
+        .sci-fi-scrollbar::-webkit-scrollbar-thumb {
+          background: linear-gradient(180deg, #00ff88 0%, rgba(0, 255, 136, 0.7) 50%, #00ff88 100%);
+          border-radius: 0px;
+          border: 1px solid rgba(0, 255, 136, 0.5);
+          box-shadow: 
+            0 0 8px rgba(0, 255, 136, 0.4),
+            inset 0 1px 0 rgba(255, 255, 255, 0.2),
+            inset 0 -1px 0 rgba(0, 0, 0, 0.5);
+        }
+        
+        .sci-fi-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: linear-gradient(180deg, #00ff88 0%, rgba(0, 255, 136, 0.9) 50%, #00ff88 100%);
+          box-shadow: 
+            0 0 12px rgba(0, 255, 136, 0.6),
+            inset 0 1px 0 rgba(255, 255, 255, 0.3),
+            inset 0 -1px 0 rgba(0, 0, 0, 0.6);
+        }
+        
+        .sci-fi-scrollbar::-webkit-scrollbar-thumb:active {
+          background: linear-gradient(180deg, rgba(0, 255, 136, 0.8) 0%, #00ff88 50%, rgba(0, 255, 136, 0.8) 100%);
+          box-shadow: 
+            0 0 15px rgba(0, 255, 136, 0.8),
+            inset 0 2px 4px rgba(0, 0, 0, 0.4);
+        }
+        
+        .sci-fi-scrollbar::-webkit-scrollbar-corner {
+          background: rgba(0, 0, 0, 0.8);
+          border: 1px solid rgba(0, 255, 136, 0.2);
+        }
+      `}</style>
       {/* Sci-fi Controls Button */}
       <button
         onClick={() => setDrawerOpen(true)}
@@ -263,7 +372,7 @@ export default function NetworkChartClient({
               boxShadow: '0 0 30px rgba(0,255,136,0.3), inset 1px 0 0 rgba(0,255,136,0.2)'
             }}
           >
-            <div className="p-6 bg-gradient-to-b from-black to-gray-900 flex-1 overflow-auto font-mono">
+            <div className="p-6 bg-gradient-to-b from-black to-gray-900 flex-1 overflow-auto font-mono sci-fi-scrollbar">
 
               <div className="text-white space-y-8">
                 <div className="text-center border-b border-[#00ff88]/30 pb-4">
@@ -403,6 +512,31 @@ export default function NetworkChartClient({
                     <div className="text-xs text-gray-500 mt-2 ml-8 uppercase tracking-wide">ANIMATED PARTICLES ON LINKS (PERFORMANCE IMPACT)</div>
                   </div>
 
+                  <div>
+                    <label className="flex items-center space-x-3 text-[#00ff88] text-xs font-medium uppercase tracking-wider cursor-pointer">
+                      <div className="relative">
+                        <input
+                          type="checkbox"
+                          checked={focusMode}
+                          onChange={(e) => setFocusModeAndUrl(e.target.checked)}
+                          className="sr-only"
+                        />
+                        <div
+                          className={`w-5 h-5 border border-[#00ff88] bg-black transition-all ${focusMode ? 'bg-[#00ff88]/20' : ''}`}
+                          style={{
+                            boxShadow: focusMode ? '0 0 8px rgba(0,255,136,0.5), inset 0 0 8px rgba(0,255,136,0.3)' : '0 0 3px rgba(0,255,136,0.3)'
+                          }}
+                        >
+                          {focusMode && (
+                            <div className="w-full h-full flex items-center justify-center text-[#00ff88] text-xs">✓</div>
+                          )}
+                        </div>
+                      </div>
+                      <span>◦ FOCUS MODE ◦</span>
+                    </label>
+                    <div className="text-xs text-gray-500 mt-2 ml-8 uppercase tracking-wide">HIDE LINKS UNTIL NODE HOVER (PERFORMANCE BOOST)</div>
+                  </div>
+
                   <button
                     onClick={handleApplyChanges}
                     disabled={!hasChanges || isPending}
@@ -496,7 +630,7 @@ export default function NetworkChartClient({
       </Drawer.Root>
 
       {/* Loading overlay */}
-      {(isPending || (networkData && !isVisualizationReady)) && (
+      {(isPending || !isVisualizationReady || !networkData) && (
         <div className={`fixed inset-0 bg-black flex items-center justify-center z-50 transition-all duration-1000 ${
           isLoadingFadingOut ? 'bg-opacity-20 backdrop-blur-sm' : 'bg-opacity-75'
         }`}>
@@ -564,6 +698,8 @@ export default function NetworkChartClient({
           data={networkData} 
           hideIsolatedNodes={currentParams.hideIsolatedNodes}
           showParticles={showParticles}
+          focusMode={focusMode}
+          onNetworkFilter={handleNetworkFilter}
           onVisualizationReady={() => {
             // Start fade-out transition
             setIsLoadingFadingOut(true);

@@ -24,3 +24,36 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Sci-fi themed scrollbar styles */
+.scrollbar-themed {
+  scrollbar-width: thin;
+  scrollbar-color: #00ff88 rgba(0, 255, 136, 0.1);
+}
+
+.scrollbar-themed::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.scrollbar-themed::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 0;
+  border: 1px solid rgba(0, 255, 136, 0.1);
+}
+
+.scrollbar-themed::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #00ff88 0%, #00cc66 100%);
+  border-radius: 0;
+  border: 1px solid rgba(0, 255, 136, 0.3);
+  box-shadow: 0 0 6px rgba(0, 255, 136, 0.4);
+}
+
+.scrollbar-themed::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #00cc66 0%, #00aa44 100%);
+  box-shadow: 0 0 10px rgba(0, 255, 136, 0.6);
+}
+
+.scrollbar-themed::-webkit-scrollbar-corner {
+  background: rgba(0, 0, 0, 0.3);
+}

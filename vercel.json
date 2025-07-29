@@ -75,6 +75,10 @@
     {
       "path": "/api/cron/update-vault-reserves",
       "schedule": "55 * * * *"
+    },
+    {
+      "path": "/api/cron/cleanup-invalid-contracts",
+      "schedule": "*/5 * * * *"
     }
   ]
 }
