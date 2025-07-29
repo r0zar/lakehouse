@@ -63,6 +63,10 @@
     {
       "path": "/api/cron/refresh-popular-tokens",
       "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/cron/calculate-token-prices",
+      "schedule": "0 * * * *"
     }
   ]
 }
