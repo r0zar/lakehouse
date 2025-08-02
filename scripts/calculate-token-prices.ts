@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 
 import { loadEnvConfig } from '@next/env';
-import { execSync } from 'child_process';
-import { writeFileSync } from 'fs';
+import { bigquery } from '../lib/bigquery';
 
 loadEnvConfig(process.cwd());
 
@@ -96,12 +95,7 @@ async function getSeedPrices(): Promise<TokenPrice[]> {
         AND usd_price < 1000000  -- Filter out obviously wrong prices
     `;
     
-    writeFileSync('/tmp/get_seed_prices.sql', query);
-    
-    const result = execSync('bq query --use_legacy_sql=false --format=json < /tmp/get_seed_prices.sql', 
-      { encoding: 'utf8' });
-    
-    const rows = JSON.parse(result);
+    const [rows] = await bigquery.query(query);
     
     if (rows.length > 0) {
       const dbPrices: TokenPrice[] = rows.map((row: any) => ({
@@ -153,13 +147,8 @@ async function loadPoolData(): Promise<void> {
     WHERE lp.pool_type = 'constant_product'  -- Only use constant product pools for price calculation
   `;
   
-  writeFileSync('/tmp/load_pool_data.sql', query);
-  
   try {
-    const result = execSync('bq query --use_legacy_sql=false --format=json < /tmp/load_pool_data.sql', 
-      { encoding: 'utf8' });
-    
-    const rows = JSON.parse(result);
+    const [rows] = await bigquery.query(query);
     poolDataCache = rows.map((row: any) => ({
       vault_contract_id: row.vault_contract_id,
       token_a_id: row.token_a_id,
@@ -348,10 +337,8 @@ async function storeFinalPrices(prices: TokenPrice[], iterationCount: number, fi
     ])
   `;
   
-  writeFileSync('/tmp/store_prices.sql', storeSQL);
-  
   try {
-    execSync('bq query --use_legacy_sql=false < /tmp/store_prices.sql', { stdio: 'inherit' });
+    await bigquery.query(storeSQL);
     console.log(`✓ Stored ${prices.length} token prices with convergence metadata`);
   } catch (error) {
     console.error('Error storing final prices:', error);
