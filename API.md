@@ -68,6 +68,81 @@ GET /api/token-prices?minPrice=0.01&limit=500
 
 ---
 
+## Token Price History API
+
+### GET `/api/token-prices/history`
+
+Retrieves historical time-series price data for a specific token with configurable time intervals and date ranges.
+
+#### Query Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `token` | string | **required** | Token contract ID to get history for |
+| `start` | string | - | Start date (ISO 8601 format, e.g., "2024-01-01") |
+| `end` | string | - | End date (ISO 8601 format, e.g., "2024-12-31") |
+| `interval` | string | "hour" | Time aggregation: "hour", "day", or "week" |
+| `limit` | number | 1000 | Maximum number of data points (1-10000) |
+
+*Note: If no start/end dates provided, returns last 30 days of data.*
+
+#### Response Format
+
+```json
+{
+  "price_history": [
+    {
+      "timestamp": "string (ISO 8601)",
+      "sbtc_price": "number",
+      "usd_price": "number",
+      "min_usd_price": "number",
+      "max_usd_price": "number", 
+      "data_points": "number"
+    }
+  ],
+  "summary": {
+    "token_contract_id": "string",
+    "total_days": "number",
+    "data_range": {
+      "start": "ISO 8601 timestamp",
+      "end": "ISO 8601 timestamp"
+    },
+    "price_statistics": {
+      "all_time_min": "number",
+      "all_time_max": "number",
+      "average_price": "number"
+    },
+    "total_data_points": "number"
+  },
+  "query_params": {
+    "token": "string",
+    "start_date": "string|null",
+    "end_date": "string|null", 
+    "interval": "string",
+    "limit": "number"
+  }
+}
+```
+
+#### Example Requests
+
+**Get hourly price history for last 30 days:**
+```
+GET /api/token-prices/history?token=SP1H1733V5MZ3SZ9XRW9FKYGEZT0JDGEB8Y634C7R.charisma-token
+```
+
+**Get daily price history for specific date range:**
+```
+GET /api/token-prices/history?token=SP1H1733V5MZ3SZ9XRW9FKYGEZT0JDGEB8Y634C7R.charisma-token&start=2024-01-01&end=2024-12-31&interval=day
+```
+
+**Get weekly price history (last 52 weeks):**
+```
+GET /api/token-prices/history?token=SP1H1733V5MZ3SZ9XRW9FKYGEZT0JDGEB8Y634C7R.charisma-token&interval=week&limit=52
+```
+
+---
+
 ## Token Price Calculation (Cron)
 
 ### GET/POST `/api/cron/calculate-token-prices`

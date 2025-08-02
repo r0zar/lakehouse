@@ -3,14 +3,19 @@ import { calculateTokenPrices } from '@/scripts/calculate-token-prices';
 
 export async function GET(request: NextRequest) {
     try {
-        // Optional: Add authentication/authorization here
+        // Optional authentication - allow Vercel cron jobs to run without auth
         const authHeader = request.headers.get('authorization');
         const cronSecret = process.env.CRON_SECRET;
         
-        // If CRON_SECRET is set, verify it matches
-        if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+        // Only require auth if CRON_SECRET is set AND this appears to be a manual request
+        const isManualRequest = authHeader !== null || request.headers.get('user-agent')?.includes('curl');
+        
+        if (cronSecret && isManualRequest && authHeader !== `Bearer ${cronSecret}`) {
             return NextResponse.json(
-                { error: 'Unauthorized' }, 
+                { 
+                    error: 'Unauthorized',
+                    hint: 'Use Authorization: Bearer <CRON_SECRET> header'
+                }, 
                 { status: 401 }
             );
         }
