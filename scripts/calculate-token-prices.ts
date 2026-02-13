@@ -170,13 +170,16 @@ async function loadPoolData(): Promise<void> {
 
 function calculatePoolTVLs(prices: TokenPrice[]): PoolTVL[] {
   console.log('Calculating pool TVLs in memory...');
-  
+
+  // sBTC is the price anchor — never re-derive it from pools
+  const sbtcTokenId = 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token';
+
   // Create price lookup map
   const priceMap = new Map<string, number>();
   for (const price of prices) {
     priceMap.set(price.token_contract_id, price.usd_price);
   }
-  
+
   const poolTVLs: PoolTVL[] = [];
   
   for (const pool of poolDataCache) {
@@ -197,7 +200,8 @@ function calculatePoolTVLs(prices: TokenPrice[]): PoolTVL[] {
     if (tvlUsd <= 0) continue;
 
     // Derive price for whichever side is unknown from the known side
-    if (tokenAPrice > 0 && adjustedReservesB > 0) {
+    // Never re-derive sBTC — it is the price anchor
+    if (tokenAPrice > 0 && adjustedReservesB > 0 && pool.token_b_id !== sbtcTokenId) {
       const tokenBPriceFromPool = (adjustedReservesA / adjustedReservesB) * tokenAPrice;
       poolTVLs.push({
         vault_contract_id: pool.vault_contract_id,
@@ -206,7 +210,7 @@ function calculatePoolTVLs(prices: TokenPrice[]): PoolTVL[] {
         tvl_usd: tvlUsd
       });
     }
-    if (tokenBPrice > 0 && adjustedReservesA > 0) {
+    if (tokenBPrice > 0 && adjustedReservesA > 0 && pool.token_a_id !== sbtcTokenId) {
       const tokenAPriceFromPool = (adjustedReservesB / adjustedReservesA) * tokenBPrice;
       poolTVLs.push({
         vault_contract_id: pool.vault_contract_id,
@@ -375,17 +379,24 @@ async function calculateTokenPrices(): Promise<void> {
       // Calculate new weighted prices (in memory)
       const newPrices = calculateWeightedPrices(poolTVLs, btcPrice);
       
+      // Merge new prices into existing prices (preserves seed prices like sBTC)
+      const mergedPrices = new Map(prices.map(p => [p.token_contract_id, p]));
+      for (const np of newPrices) {
+        mergedPrices.set(np.token_contract_id, np);
+      }
+      const updatedPrices = Array.from(mergedPrices.values());
+
       // Check convergence
-      const converged = iteration > 0 && hasConverged(prices, newPrices, 0.001);
+      const converged = iteration > 0 && hasConverged(prices, updatedPrices, 0.001);
       if (converged) {
         console.log(`\n✅ Converged after ${iteration + 1} iterations`);
         finalIteration = iteration + 1;
-        finalConvergencePercent = calculateConvergencePercent(prices, newPrices);
-        prices = newPrices;
+        finalConvergencePercent = calculateConvergencePercent(prices, updatedPrices);
+        prices = updatedPrices;
         break;
       }
-      
-      prices = newPrices;
+
+      prices = updatedPrices;
       
       // Track final convergence if we hit max iterations
       if (iteration === 9) {
@@ -401,12 +412,14 @@ async function calculateTokenPrices(): Promise<void> {
     
     // 4. Store final prices with convergence metadata
     // Add sBTC to final prices so it gets a fresh timestamp
+    const sbtcId = 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token';
     const sbtcSeed: TokenPrice = {
-      token_contract_id: 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token',
+      token_contract_id: sbtcId,
       sbtc_price: 1.0,
       usd_price: btcPrice
     };
-    await storeFinalPrices([sbtcSeed, ...prices], finalIteration, finalConvergencePercent);
+    const filteredPrices = prices.filter(p => p.token_contract_id !== sbtcId);
+    await storeFinalPrices([sbtcSeed, ...filteredPrices], finalIteration, finalConvergencePercent);
     
     console.log(`\n🎉 Successfully calculated prices for ${prices.length} tokens!`);
     
