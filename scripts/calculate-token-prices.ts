@@ -183,36 +183,31 @@ function calculatePoolTVLs(prices: TokenPrice[]): PoolTVL[] {
     const tokenAPrice = priceMap.get(pool.token_a_id) || 0;
     const tokenBPrice = priceMap.get(pool.token_b_id) || 0;
     
-    // Skip pools where we don't have both token prices
-    if (tokenAPrice === 0 || tokenBPrice === 0) continue;
-    
+    // Skip pools where neither side has a known price
+    if (tokenAPrice === 0 && tokenBPrice === 0) continue;
+
     // Adjust reserves for decimals
     const adjustedReservesA = pool.reserves_a / Math.pow(10, pool.token_a_decimals);
     const adjustedReservesB = pool.reserves_b / Math.pow(10, pool.token_b_decimals);
-    
-    // Calculate TVL
+
+    // Calculate TVL (use known prices; unknown sides contribute 0)
     const tvlUsd = adjustedReservesA * tokenAPrice + adjustedReservesB * tokenBPrice;
-    
+
     // Skip pools with no meaningful TVL
     if (tvlUsd <= 0) continue;
-    
-    // Only calculate prices relative to sBTC (stable anchor)
-    const sbtcTokenId = 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token';
-    const sbtcPrice = priceMap.get(sbtcTokenId) || 0;
-    
-    // Only create price data if one of the tokens is sBTC
-    if (pool.token_a_id === sbtcTokenId && adjustedReservesA > 0) {
-      // Token B price = (sBTC reserves / Token B reserves) * sBTC price
-      const tokenBPriceFromPool = (adjustedReservesA / adjustedReservesB) * sbtcPrice;
+
+    // Derive price for whichever side is unknown from the known side
+    if (tokenAPrice > 0 && adjustedReservesB > 0) {
+      const tokenBPriceFromPool = (adjustedReservesA / adjustedReservesB) * tokenAPrice;
       poolTVLs.push({
         vault_contract_id: pool.vault_contract_id,
         token_contract_id: pool.token_b_id,
         individual_price: tokenBPriceFromPool,
         tvl_usd: tvlUsd
       });
-    } else if (pool.token_b_id === sbtcTokenId && adjustedReservesB > 0) {
-      // Token A price = (sBTC reserves / Token A reserves) * sBTC price  
-      const tokenAPriceFromPool = (adjustedReservesB / adjustedReservesA) * sbtcPrice;
+    }
+    if (tokenBPrice > 0 && adjustedReservesA > 0) {
+      const tokenAPriceFromPool = (adjustedReservesB / adjustedReservesA) * tokenBPrice;
       poolTVLs.push({
         vault_contract_id: pool.vault_contract_id,
         token_contract_id: pool.token_a_id,
@@ -405,7 +400,13 @@ async function calculateTokenPrices(): Promise<void> {
     }
     
     // 4. Store final prices with convergence metadata
-    await storeFinalPrices(prices, finalIteration, finalConvergencePercent);
+    // Add sBTC to final prices so it gets a fresh timestamp
+    const sbtcSeed: TokenPrice = {
+      token_contract_id: 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token',
+      sbtc_price: 1.0,
+      usd_price: btcPrice
+    };
+    await storeFinalPrices([sbtcSeed, ...prices], finalIteration, finalConvergencePercent);
     
     console.log(`\n🎉 Successfully calculated prices for ${prices.length} tokens!`);
     
