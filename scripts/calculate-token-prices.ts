@@ -82,36 +82,8 @@ async function getSeedPrices(): Promise<TokenPrice[]> {
     }
   ];
   
-  // Try to get existing prices from database for other tokens (excluding sBTC to avoid circular dependency)
-  try {
-    const query = `
-      SELECT 
-        token_contract_id,
-        sbtc_price,
-        usd_price
-      FROM \`crypto_data.current_token_prices\`
-      WHERE usd_price > 0 AND sbtc_price > 0
-        AND token_contract_id != 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token'
-        AND usd_price < 1000000  -- Filter out obviously wrong prices
-    `;
-    
-    const [rows] = await bigquery.query(query);
-    
-    if (rows.length > 0) {
-      const dbPrices: TokenPrice[] = rows.map((row: any) => ({
-        token_contract_id: row.token_contract_id,
-        sbtc_price: parseFloat(row.sbtc_price),
-        usd_price: parseFloat(row.usd_price)
-      }));
-      
-      // Add database prices to seed prices
-      seedPrices.push(...dbPrices);
-      console.log(`✓ Added ${dbPrices.length} existing prices from database`);
-    }
-    
-  } catch (error) {
-    console.log('No additional database prices available, continuing with sBTC only...');
-  }
+  // Note: No DB seeding — sBTC is the sole anchor.
+  // Multi-hop iteration discovers all other prices from pool reserves.
   
   console.log(`✓ Using ${seedPrices.length} seed prices total`);
   
@@ -199,9 +171,10 @@ function calculatePoolTVLs(prices: TokenPrice[]): PoolTVL[] {
     // Skip pools with no meaningful TVL
     if (tvlUsd <= 0) continue;
 
-    // Derive price for whichever side is unknown from the known side
-    // Never re-derive sBTC — it is the price anchor
-    if (tokenAPrice > 0 && adjustedReservesB > 0 && pool.token_b_id !== sbtcTokenId) {
+    // Derive price for the unknown side from the known side.
+    // If both sides are known, skip — re-deriving both creates oscillation.
+    // Never re-derive sBTC — it is the price anchor.
+    if (tokenAPrice > 0 && tokenBPrice === 0 && adjustedReservesB > 0 && pool.token_b_id !== sbtcTokenId) {
       const tokenBPriceFromPool = (adjustedReservesA / adjustedReservesB) * tokenAPrice;
       poolTVLs.push({
         vault_contract_id: pool.vault_contract_id,
@@ -209,8 +182,7 @@ function calculatePoolTVLs(prices: TokenPrice[]): PoolTVL[] {
         individual_price: tokenBPriceFromPool,
         tvl_usd: tvlUsd
       });
-    }
-    if (tokenBPrice > 0 && adjustedReservesA > 0 && pool.token_a_id !== sbtcTokenId) {
+    } else if (tokenBPrice > 0 && tokenAPrice === 0 && adjustedReservesA > 0 && pool.token_a_id !== sbtcTokenId) {
       const tokenAPriceFromPool = (adjustedReservesB / adjustedReservesA) * tokenBPrice;
       poolTVLs.push({
         vault_contract_id: pool.vault_contract_id,
@@ -386,8 +358,9 @@ async function calculateTokenPrices(): Promise<void> {
       }
       const updatedPrices = Array.from(mergedPrices.values());
 
-      // Check convergence
-      const converged = iteration > 0 && hasConverged(prices, updatedPrices, 0.001);
+      // Check convergence (also require no new tokens discovered this iteration)
+      const newTokensDiscovered = updatedPrices.length > prices.length;
+      const converged = iteration > 0 && !newTokensDiscovered && hasConverged(prices, updatedPrices, 0.001);
       if (converged) {
         console.log(`\n✅ Converged after ${iteration + 1} iterations`);
         finalIteration = iteration + 1;
@@ -418,7 +391,11 @@ async function calculateTokenPrices(): Promise<void> {
       sbtc_price: 1.0,
       usd_price: btcPrice
     };
-    const filteredPrices = prices.filter(p => p.token_contract_id !== sbtcId);
+    const filteredPrices = prices.filter(p =>
+      p.token_contract_id !== sbtcId &&
+      isFinite(p.usd_price) && p.usd_price > 0 &&
+      isFinite(p.sbtc_price) && p.sbtc_price > 0
+    );
     await storeFinalPrices([sbtcSeed, ...filteredPrices], finalIteration, finalConvergencePercent);
     
     console.log(`\n🎉 Successfully calculated prices for ${prices.length} tokens!`);
